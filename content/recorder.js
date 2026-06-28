@@ -76,6 +76,25 @@
     // through verbatim; the worker stamps time + route.
     send('mark', { text: trimmed });
     setCounter(); // refresh shown route etc.
+    showToast('MARK saved');
+  }
+
+  // Brief visible confirmation so the operator gets feedback without hunting for
+  // the tiny input. Fixed-position, high z-index like the overlay; auto-dismiss.
+  function showToast(text) {
+    const toast = document.createElement('div');
+    toast.className = '__audit_toast__';
+    toast.textContent = text;
+    toast.style.cssText = [
+      'position:fixed', 'z-index:2147483647', 'bottom:104px', 'right:16px',
+      'background:#1e7a34', 'color:#fff', 'font:12px/1.4 system-ui,sans-serif',
+      'padding:8px 12px', 'border-radius:8px',
+      'box-shadow:0 2px 12px rgba(0,0,0,.4)', 'user-select:none',
+    ].join(';');
+    document.documentElement.appendChild(toast);
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 1500);
   }
 
   // ---- overlay UI ----------------------------------------------------------
