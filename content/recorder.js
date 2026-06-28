@@ -280,7 +280,10 @@
 
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'max-width:96vw;max-height:84vh;background:#fff;cursor:crosshair;box-shadow:0 4px 24px rgba(0,0,0,.6)';
-    const ctx = canvas.getContext('2d');
+    // willReadFrequently: the shape-preview path snapshots the canvas via
+    // getImageData on every mousemove, so flag it for fast readbacks (and to
+    // silence the Canvas2D advisory, which would otherwise leak into console.txt).
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     // Draw the screenshot in once it loads; canvas pixels match the image.
     const img = new Image();
