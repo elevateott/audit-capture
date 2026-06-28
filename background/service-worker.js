@@ -122,6 +122,17 @@ async function startConsoleTap(tabId, since) {
           ref: null,
         }).catch(() => {});
       },
+      onNetwork: (row) => {
+        // Failed requests only (see lib/debugger-tap.js). Same fire-and-forget +
+        // keystone-timeline pattern as console rows.
+        self.AuditStore.put('network', row).catch(() => {});
+        appendTimeline({
+          t: row.t,
+          route: row.route,
+          type: 'network',
+          ref: null,
+        }).catch(() => {});
+      },
     });
   } catch (e) {
     // Debugger may be unavailable (another client attached, restricted page).
