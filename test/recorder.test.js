@@ -89,6 +89,19 @@ test('the MARK field is a textarea (multi-line, scrollable)', async () => {
   assert.equal(field.tagName, 'TEXTAREA');
 });
 
+test('the MARK input has a Save button that submits and closes', async () => {
+  await deliver({ type: 'recorder:start', intervalMs: 5000 });
+  await deliver({ type: 'recorder:mark-prompt' });
+  const field = document.querySelector('#__audit_mark_input__ textarea');
+  field.value = 'MARK 005 — saved via button';
+  const before = sent.filter((m) => m && m.type === 'mark').length;
+  const save = document.getElementById('__audit_mark_save__');
+  assert.ok(save, 'a Save button must exist in the MARK input');
+  fireClick(save);
+  assert.equal(sent.filter((m) => m && m.type === 'mark').length, before + 1, 'clicking Save submits the mark');
+  assert.equal(document.getElementById('__audit_mark_input__'), null, 'the input closes after Save');
+});
+
 test('typing + Enter sends a mark message', async () => {
   await deliver({ type: 'recorder:start', intervalMs: 5000 });
   await deliver({ type: 'recorder:mark-prompt' });
