@@ -181,11 +181,26 @@ test('loadingFailed -> network row with errorText as status', async () => {
   await tap.detach({ tabId: 23 });
 });
 
-test('network failures respect the since filter', async () => {
+// CDP Network timestamps are MonotonicTime (seconds since an arbitrary origin) —
+// NOT epoch ms like Runtime/Log. So network rows must be stamped with Date.now()
+// at receipt, or they can't interleave in the timeline AND the epoch-ms `since`
+// filter would wrongly drop every one of them.
+test('network row t is wall-clock epoch ms, not the CDP monotonic timestamp', async () => {
   const net = [];
-  await tap.attach({ tabId: 24, since: 5000, getRoute: () => '/', onNetwork: (r) => net.push(r) });
-  global.chrome._fire({ tabId: 24 }, 'Network.requestWillBeSent', { requestId: 'd', request: { method: 'GET', url: 'https://api/old' }, timestamp: 4000 });
-  global.chrome._fire({ tabId: 24 }, 'Network.responseReceived', { requestId: 'd', response: { status: 404, url: 'https://api/old' }, timestamp: 4000 });
-  assert.equal(net.length, 0, 'pre-session network failures must be dropped');
-  await tap.detach({ tabId: 24 });
+  await tap.attach({ tabId: 25, since: 0, getRoute: () => '/', onNetwork: (r) => net.push(r) });
+  global.chrome._fire({ tabId: 25 }, 'Network.requestWillBeSent', { requestId: 'e', request: { method: 'GET', url: 'https://api/x' }, timestamp: 1234.5 });
+  global.chrome._fire({ tabId: 25 }, 'Network.responseReceived', { requestId: 'e', response: { status: 500, url: 'https://api/x' }, timestamp: 1235.0 });
+  assert.equal(net.length, 1);
+  assert.ok(net[0].t > 1e12, 'network t must be epoch ms (Date.now()), not the CDP monotonic seconds');
+  await tap.detach({ tabId: 25 });
+});
+
+test('a live network failure is NOT dropped by the since filter', async () => {
+  const net = [];
+  // since = a real epoch-ms session start; the CDP network timestamp is tiny.
+  await tap.attach({ tabId: 26, since: Date.now(), getRoute: () => '/', onNetwork: (r) => net.push(r) });
+  global.chrome._fire({ tabId: 26 }, 'Network.requestWillBeSent', { requestId: 'f', request: { method: 'GET', url: 'https://api/y' }, timestamp: 9999.0 });
+  global.chrome._fire({ tabId: 26 }, 'Network.responseReceived', { requestId: 'f', response: { status: 404, url: 'https://api/y' }, timestamp: 9999.5 });
+  assert.equal(net.length, 1, 'live failures must be kept (network timestamps are not epoch-comparable to since)');
+  await tap.detach({ tabId: 26 });
 });
