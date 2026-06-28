@@ -173,8 +173,33 @@
       if (ev.key === 'Enter') { submitMark(input.value); close(); }
       if (ev.key === 'Escape') close();
     });
+
+    // Dictation: fill the MARK input via Web Speech. Lives inside
+    // #__audit_mark_input__, so isOwnUi already keeps its clicks off the spine.
+    const mic = document.createElement('button');
+    mic.id = '__audit_mark_mic__';
+    mic.textContent = '🎤';
+    mic.title = 'Dictate';
+    mic.style.cssText =
+      'background:#3a3a40;color:#fff;border:0;border-radius:5px;padding:5px 8px;cursor:pointer;font:inherit';
+    mic.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) return; // graceful no-op when the browser lacks Web Speech.
+      const rec = new SR();
+      rec.lang = 'en-US';
+      rec.interimResults = true;
+      rec.onresult = (e) => {
+        let t = '';
+        for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+        input.value = t;
+      };
+      try { rec.start(); } catch (e) { /* already started / not allowed */ }
+    });
+
     function close() { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }
     wrap.appendChild(input);
+    wrap.appendChild(mic);
     document.documentElement.appendChild(wrap);
     input.focus();
   }
