@@ -164,13 +164,21 @@
       'background:#1e1e22', 'padding:8px', 'border-radius:8px',
       'box-shadow:0 2px 12px rgba(0,0,0,.4)', 'display:flex', 'gap:6px',
     ].join(';');
-    const input = document.createElement('input');
-    input.type = 'text';
+    // A textarea (not a single-line input) so dictated speech is readable and
+    // scrollable: fixed max-height, scrolls rather than growing without bound.
+    const input = document.createElement('textarea');
+    input.rows = 3;
     input.placeholder = 'MARK 001 — what you see, verdict';
     input.style.cssText =
-      'width:320px;font:12px system-ui,sans-serif;padding:5px 7px;border:1px solid #444;border-radius:5px;background:#111;color:#fff';
+      'width:320px;max-height:6em;overflow-y:auto;resize:none;' +
+      'font:12px system-ui,sans-serif;padding:5px 7px;border:1px solid #444;border-radius:5px;background:#111;color:#fff';
     input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { submitMark(input.value); close(); }
+      // Enter submits; Shift+Enter inserts a newline.
+      if (ev.key === 'Enter' && !ev.shiftKey) {
+        ev.preventDefault();
+        submitMark(input.value);
+        close();
+      }
       if (ev.key === 'Escape') close();
     });
 
@@ -198,6 +206,7 @@
         let t = '';
         for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
         input.value = t;
+        input.scrollTop = input.scrollHeight; // keep the newest words in view.
       };
       rec.onend = () => {
         rec = null;
