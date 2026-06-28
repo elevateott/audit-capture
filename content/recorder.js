@@ -35,10 +35,16 @@
 
   // ---- click spine ---------------------------------------------------------
 
+  // Our own overlay/MARK input live in the page; never record interactions
+  // with them as part of the audited app.
+  const AUDIT_UI = '#__audit_capture_overlay__, #__audit_mark_input__';
+  const isOwnUi = (el) => !!(el && el.closest && el.closest(AUDIT_UI));
+
   function onClick(e) {
     if (!active) return;
     const target = e.target;
     if (!(target instanceof Element)) return;
+    if (isOwnUi(target)) return;
     const sel = window.AuditSelector ? window.AuditSelector.cssPath(target) : '';
     send('step', { step: { type: 'click', selectors: [[sel]] } });
     send('capture', { reason: 'click' });
@@ -48,6 +54,7 @@
     if (!active) return;
     const target = e.target;
     if (!(target instanceof Element)) return;
+    if (isOwnUi(target)) return;
     const sel = window.AuditSelector ? window.AuditSelector.cssPath(target) : '';
     const value = 'value' in target ? String(target.value) : undefined;
     send('step', { step: { type: 'change', selectors: [[sel]], value } });

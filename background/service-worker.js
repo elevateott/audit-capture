@@ -104,15 +104,23 @@ async function addMark(text, route) {
 
 // ---- console tap (chrome.debugger, swappable — see lib/debugger-tap.js) -----
 
-async function startConsoleTap(tabId) {
+async function startConsoleTap(tabId, since) {
   if (tabId == null) return;
   try {
     await self.AuditDebuggerTap.attach({
       tabId,
+      since,
       getRoute: () => lastRoute,
       onEvent: (row) => {
         // Fire-and-forget; a dropped console row must never break capture.
         self.AuditStore.put('console', row).catch(() => {});
+        // Keystone: every capture path also appends a timeline entry.
+        appendTimeline({
+          t: row.t,
+          route: row.route,
+          type: 'console',
+          ref: null,
+        }).catch(() => {});
       },
     });
   } catch (e) {
@@ -147,7 +155,8 @@ async function startSession(tab) {
   await setSession(session);
 
   // Attach the console tap (Phase 2). Shows the "is being debugged" banner.
-  await startConsoleTap(session.tabId);
+  // `since` drops pre-session events Chrome replays on attach.
+  await startConsoleTap(session.tabId, session.startedAt);
 
   // First step: setViewport, so recording.json matches DevTools Recorder shape.
   await appendStep({ type: 'setViewport', title: session.title });
