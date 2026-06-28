@@ -124,3 +124,66 @@ test('changes on the MARK input are NOT recorded (no self-capture)', async () =>
   fireClick(input);
   assert.equal(stepCount(), before, 'interactions with the MARK input must not produce steps');
 });
+
+// --- VOICE (red): dictate MARK text via Web Speech ---------------------------
+// A mic button (#__audit_mark_mic__) in the MARK input starts
+// window.SpeechRecognition || webkitSpeechRecognition; onresult fills the input
+// value. No SpeechRecognition support => graceful no-op (no throw). This only
+// fills the existing MARK input — no output-contract change.
+
+// Minimal fake SpeechRecognition; records instances and start() calls.
+function installFakeSR() {
+  const created = [];
+  class FakeSR {
+    constructor() { created.push(this); this.started = false; this.lang = ''; this.interimResults = false; }
+    start() { this.started = true; }
+    stop() {}
+    // test helper
+    _emit(transcript) { if (this.onresult) this.onresult({ results: [[{ transcript }]] }); }
+  }
+  dom.window.SpeechRecognition = FakeSR;
+  dom.window.webkitSpeechRecognition = FakeSR;
+  return created;
+}
+function removeSR() {
+  delete dom.window.SpeechRecognition;
+  delete dom.window.webkitSpeechRecognition;
+}
+
+test('the MARK input has a mic/dictate button', async () => {
+  installFakeSR();
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  assert.ok(document.getElementById('__audit_mark_mic__'), 'a #__audit_mark_mic__ control should exist');
+  removeSR();
+});
+
+test('clicking the mic starts speech recognition', async () => {
+  const created = installFakeSR();
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  fireClick(document.getElementById('__audit_mark_mic__'));
+  assert.equal(created.length, 1, 'a SpeechRecognition instance must be created');
+  assert.equal(created[0].started, true, 'recognition must be started');
+  removeSR();
+});
+
+test('a speech result fills the MARK input', async () => {
+  const created = installFakeSR();
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  fireClick(document.getElementById('__audit_mark_mic__'));
+  created[0]._emit('move this card to the sidebar');
+  const input = document.querySelector('#__audit_mark_input__ input');
+  assert.equal(input.value, 'move this card to the sidebar');
+  removeSR();
+});
+
+test('no SpeechRecognition support -> clicking mic does not throw', async () => {
+  removeSR();
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  const mic = document.getElementById('__audit_mark_mic__');
+  assert.ok(mic, 'mic control should still render');
+  assert.doesNotThrow(() => fireClick(mic));
+});
