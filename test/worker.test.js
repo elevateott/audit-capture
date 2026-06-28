@@ -130,3 +130,15 @@ test('a mark message writes narration and a timeline mark entry', async () => {
   const tl = await self.AuditStore.getAll('timeline');
   assert.ok(tl.some((e) => e.type === 'mark'), 'a mark timeline entry must exist');
 });
+
+// --- NETWORK keystone (red): failures stored + appended to timeline ----------
+test('a captured network failure is stored and appended to the timeline', async () => {
+  await send({ type: 'session:start' });
+  global.chrome._fireDbg({ tabId: 1 }, 'Network.requestWillBeSent', { requestId: 'z', request: { method: 'GET', url: 'https://api/x' }, timestamp: Date.now() });
+  global.chrome._fireDbg({ tabId: 1 }, 'Network.responseReceived', { requestId: 'z', response: { status: 404, url: 'https://api/x' }, timestamp: Date.now() });
+  await delay(50);
+  const net = await self.AuditStore.getAll('network');
+  assert.equal(net.length, 1, 'failed request must be stored');
+  const tl = await self.AuditStore.getAll('timeline');
+  assert.ok(tl.some((e) => e.type === 'network'), 'network failures must appear in timeline.json');
+});

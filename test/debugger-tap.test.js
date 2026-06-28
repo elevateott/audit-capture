@@ -136,3 +136,56 @@ test('events older than the session start (since) are dropped', async () => {
   assert.equal(rows[0].message, 'live');
   await tap.detach({ tabId: 12 });
 });
+
+// --- NETWORK surface (red): failed requests only -----------------------------
+// attach() also takes onNetwork({ t, route, method, url, status }); the tap
+// enables the Network domain and correlates requestWillBeSent (method+url) with
+// responseReceived (status>=400) / loadingFailed (errorText) by requestId.
+
+test('Network.enable is sent on attach', async () => {
+  await tap.attach({ tabId: 20, getRoute: () => '/', onEvent: () => {}, onNetwork: () => {} });
+  assert.ok(global.chrome._calls.sendCommand.includes('Network.enable'), 'must enable the Network domain');
+  await tap.detach({ tabId: 20 });
+});
+
+test('responseReceived >=400 -> network row with correlated method', async () => {
+  const net = [];
+  await tap.attach({ tabId: 21, getRoute: () => '/dash', onNetwork: (r) => net.push(r) });
+  global.chrome._fire({ tabId: 21 }, 'Network.requestWillBeSent', { requestId: 'a', request: { method: 'GET', url: 'https://api/x' }, timestamp: 2000 });
+  global.chrome._fire({ tabId: 21 }, 'Network.responseReceived', { requestId: 'a', response: { status: 404, url: 'https://api/x' }, timestamp: 2100 });
+  assert.equal(net.length, 1);
+  assert.equal(net[0].method, 'GET');
+  assert.equal(net[0].status, 404);
+  assert.equal(net[0].url, 'https://api/x');
+  assert.equal(net[0].route, '/dash');
+  await tap.detach({ tabId: 21 });
+});
+
+test('2xx/3xx responses produce no network row', async () => {
+  const net = [];
+  await tap.attach({ tabId: 22, getRoute: () => '/', onNetwork: (r) => net.push(r) });
+  global.chrome._fire({ tabId: 22 }, 'Network.requestWillBeSent', { requestId: 'b', request: { method: 'GET', url: 'https://api/ok' }, timestamp: 1 });
+  global.chrome._fire({ tabId: 22 }, 'Network.responseReceived', { requestId: 'b', response: { status: 200, url: 'https://api/ok' }, timestamp: 2 });
+  assert.equal(net.length, 0);
+  await tap.detach({ tabId: 22 });
+});
+
+test('loadingFailed -> network row with errorText as status', async () => {
+  const net = [];
+  await tap.attach({ tabId: 23, getRoute: () => '/', onNetwork: (r) => net.push(r) });
+  global.chrome._fire({ tabId: 23 }, 'Network.requestWillBeSent', { requestId: 'c', request: { method: 'GET', url: 'https://api/down' }, timestamp: 1 });
+  global.chrome._fire({ tabId: 23 }, 'Network.loadingFailed', { requestId: 'c', errorText: 'net::ERR_NAME_NOT_RESOLVED', timestamp: 2 });
+  assert.equal(net.length, 1);
+  assert.equal(net[0].status, 'net::ERR_NAME_NOT_RESOLVED');
+  assert.equal(net[0].url, 'https://api/down');
+  await tap.detach({ tabId: 23 });
+});
+
+test('network failures respect the since filter', async () => {
+  const net = [];
+  await tap.attach({ tabId: 24, since: 5000, getRoute: () => '/', onNetwork: (r) => net.push(r) });
+  global.chrome._fire({ tabId: 24 }, 'Network.requestWillBeSent', { requestId: 'd', request: { method: 'GET', url: 'https://api/old' }, timestamp: 4000 });
+  global.chrome._fire({ tabId: 24 }, 'Network.responseReceived', { requestId: 'd', response: { status: 404, url: 'https://api/old' }, timestamp: 4000 });
+  assert.equal(net.length, 0, 'pre-session network failures must be dropped');
+  await tap.detach({ tabId: 24 });
+});
