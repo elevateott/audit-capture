@@ -230,6 +230,24 @@
     window.addEventListener('hashchange', onNav);
     startTicking(intervalMs);
     buildOverlay();
+    sendEnvironment();
+  }
+
+  // One-time context header captured at session start (PRD §4.7). `custom` is the
+  // per-project extractor hook and ships EMPTY so no target-app context leaks into
+  // the generic core.
+  function sendEnvironment() {
+    const env = {
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      dpr: window.devicePixelRatio,
+      zoom: window.visualViewport ? window.visualViewport.scale : 1,
+      ua: navigator.userAgent,
+      host: location.host,
+      url: location.href,
+      capturedAt: new Date().toISOString(),
+      custom: {},
+    };
+    send('environment', { env });
   }
 
   function disable() {

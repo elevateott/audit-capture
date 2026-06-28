@@ -277,6 +277,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
       }
+      case 'environment': {
+        // One-time context header, NOT a timed event — store it, but do NOT
+        // append a timeline entry (unlike console/network).
+        await self.AuditStore.put('environment', msg.env);
+        sendResponse({ ok: true });
+        break;
+      }
       default:
         sendResponse({ ok: false, error: 'unknown message type' });
     }

@@ -79,7 +79,7 @@ test('recorder:mark-prompt shows the MARK input', async () => {
 test('typing + Enter sends a mark message', async () => {
   await deliver({ type: 'recorder:start', intervalMs: 5000 });
   await deliver({ type: 'recorder:mark-prompt' });
-  const input = document.querySelector('#__audit_mark_input__ input');
+  const input = document.querySelector('#__audit_mark_input__ textarea');
   input.value = 'MARK 001 — header overlaps, verdict: bug';
   input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   const mark = sent.find((m) => m && m.type === 'mark');
@@ -90,7 +90,7 @@ test('an empty MARK sends nothing', async () => {
   await deliver({ type: 'recorder:start', intervalMs: 5000 });
   await deliver({ type: 'recorder:mark-prompt' });
   const before = sent.filter((m) => m && m.type === 'mark').length;
-  const input = document.querySelector('#__audit_mark_input__ input');
+  const input = document.querySelector('#__audit_mark_input__ textarea');
   input.value = '   ';
   input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   assert.equal(sent.filter((m) => m && m.type === 'mark').length, before);
@@ -99,7 +99,7 @@ test('an empty MARK sends nothing', async () => {
 test('submitting a MARK shows a visible confirmation toast', async () => {
   await deliver({ type: 'recorder:start', intervalMs: 5000 });
   await deliver({ type: 'recorder:mark-prompt' });
-  const input = document.querySelector('#__audit_mark_input__ input');
+  const input = document.querySelector('#__audit_mark_input__ textarea');
   input.value = 'MARK 002 — spacing off, verdict: nit';
   input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   assert.ok(hasText(/MARK saved/i), 'a confirmation toast should appear after a MARK');
@@ -127,7 +127,7 @@ test('clicks on the audit overlay are NOT recorded (no self-capture)', async () 
 test('changes on the MARK input are NOT recorded (no self-capture)', async () => {
   await deliver({ type: 'recorder:start', intervalMs: 5000 });
   await deliver({ type: 'recorder:mark-prompt' });
-  const input = document.querySelector('#__audit_mark_input__ input');
+  const input = document.querySelector('#__audit_mark_input__ textarea');
   const before = stepCount();
   input.value = 'typing in our own box';
   input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
@@ -184,7 +184,7 @@ test('a speech result fills the MARK input', async () => {
   await deliver({ type: 'recorder:mark-prompt' });
   fireClick(document.getElementById('__audit_mark_mic__'));
   created[0]._emit('move this card to the sidebar');
-  const input = document.querySelector('#__audit_mark_input__ input');
+  const input = document.querySelector('#__audit_mark_input__ textarea');
   assert.equal(input.value, 'move this card to the sidebar');
   removeSR();
 });
