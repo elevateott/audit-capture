@@ -76,6 +76,18 @@ test('recorder:mark-prompt shows the MARK input', async () => {
   assert.ok(document.getElementById('__audit_mark_input__'));
 });
 
+// The MARK field must be a multi-line, scrollable textarea so dictated text is
+// readable (you can scroll back; it auto-scrolls to the latest words as you speak).
+// The scroll behavior itself is browser-gated (jsdom has no layout); here we only
+// assert the field is a textarea.
+test('the MARK field is a textarea (multi-line, scrollable)', async () => {
+  await deliver({ type: 'recorder:start', intervalMs: 5000 });
+  await deliver({ type: 'recorder:mark-prompt' });
+  const field = document.querySelector('#__audit_mark_input__ textarea');
+  assert.ok(field, 'the MARK field must be a <textarea>');
+  assert.equal(field.tagName, 'TEXTAREA');
+});
+
 test('typing + Enter sends a mark message', async () => {
   await deliver({ type: 'recorder:start', intervalMs: 5000 });
   await deliver({ type: 'recorder:mark-prompt' });
