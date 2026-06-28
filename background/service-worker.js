@@ -284,6 +284,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
       }
+      case 'annotate:capture': {
+        // Snapshot the visible tab as a PNG for the operator to draw on. The
+        // content script opens the annotator with this dataUrl.
+        try {
+          const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
+            format: 'png',
+          });
+          sendResponse({ ok: true, dataUrl });
+        } catch (e) {
+          sendResponse({ ok: false, error: e && e.message });
+        }
+        break;
+      }
+      case 'annotation': {
+        // The saved drawing. Store it as a '*_annotated.png' frame + a timeline
+        // entry, but only while a session is active.
+        const session = await getSession();
+        if (!session || !session.active) {
+          sendResponse({ ok: false, error: 'no active session' });
+          break;
+        }
+        const t = Date.now();
+        const name = self.AuditPackage.stamp(new Date(t)) + '_annotated.png';
+        await self.AuditStore.put('annotations', {
+          name,
+          dataUrl: msg.dataUrl,
+          t,
+          route,
+        });
+        await appendTimeline({ t, route, type: 'annotation', ref: name });
+        sendResponse({ ok: true, name });
+        break;
+      }
       default:
         sendResponse({ ok: false, error: 'unknown message type' });
     }

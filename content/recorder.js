@@ -11,6 +11,7 @@
 
   let intervalId = null;
   let active = false;
+  let currentIntervalMs = 5000; // last interval, so the annotator can resume it.
 
   const route = () => location.pathname + location.search;
 
@@ -26,7 +27,8 @@
 
   function startTicking(intervalMs) {
     stopTicking();
-    intervalId = setInterval(() => send('capture', { reason: 'interval' }), intervalMs || 5000);
+    currentIntervalMs = intervalMs || currentIntervalMs;
+    intervalId = setInterval(() => send('capture', { reason: 'interval' }), currentIntervalMs);
   }
   function stopTicking() {
     if (intervalId != null) clearInterval(intervalId);
@@ -37,7 +39,7 @@
 
   // Our own overlay/MARK input live in the page; never record interactions
   // with them as part of the audited app.
-  const AUDIT_UI = '#__audit_capture_overlay__, #__audit_mark_input__';
+  const AUDIT_UI = '#__audit_capture_overlay__, #__audit_mark_input__, #__audit_annotator__';
   const isOwnUi = (el) => !!(el && el.closest && el.closest(AUDIT_UI));
 
   function onClick(e) {
@@ -136,9 +138,24 @@
       showMarkInput();
     });
 
+    const annotateBtn = document.createElement('button');
+    annotateBtn.id = '__audit_annotate__';
+    annotateBtn.textContent = 'Annotate';
+    annotateBtn.style.cssText =
+      'background:#3a3a40;color:#fff;border:0;border-radius:5px;padding:3px 8px;cursor:pointer;font:inherit';
+    annotateBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      chrome.runtime.sendMessage({ type: 'annotate:capture', route: route() }, (resp) => {
+        if (chrome.runtime.lastError) return;
+        if (!resp || !resp.dataUrl) return;
+        openAnnotator(resp.dataUrl);
+      });
+    });
+
     overlay.appendChild(dot);
     overlay.appendChild(counterEl);
     overlay.appendChild(markBtn);
+    overlay.appendChild(annotateBtn);
     document.documentElement.appendChild(overlay);
     setCounter();
   }
@@ -225,6 +242,155 @@
     wrap.appendChild(mic);
     document.documentElement.appendChild(wrap);
     input.focus();
+  }
+
+  // ---- annotator -----------------------------------------------------------
+
+  // Full-viewport overlay showing the captured screenshot on a <canvas> with a
+  // pen/arrow/circle toolbar. Save exports the canvas to a PNG and ships it as an
+  // 'annotation' message. While it's open we pause the capture interval so an
+  // interval frame doesn't screenshot the drawing surface itself.
+  function openAnnotator(dataUrl) {
+    const existing = document.getElementById('__audit_annotator__');
+    if (existing) return; // one at a time.
+
+    stopTicking(); // don't let interval frames shoot the overlay.
+
+    const box = document.createElement('div');
+    box.id = '__audit_annotator__';
+    box.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:2147483647',
+      'background:rgba(0,0,0,.75)', 'display:flex', 'flex-direction:column',
+      'align-items:center', 'justify-content:center', 'gap:8px',
+    ].join(';');
+
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'max-width:96vw;max-height:84vh;background:#fff;cursor:crosshair;box-shadow:0 4px 24px rgba(0,0,0,.6)';
+    const ctx = canvas.getContext('2d');
+
+    // Draw the screenshot in once it loads; canvas pixels match the image.
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      if (ctx) ctx.drawImage(img, 0, 0);
+    };
+    img.src = dataUrl;
+
+    let tool = 'pen';
+    const toolbar = document.createElement('div');
+    toolbar.style.cssText = [
+      'display:flex', 'gap:6px', 'background:#1e1e22', 'padding:8px',
+      'border-radius:8px', 'box-shadow:0 2px 12px rgba(0,0,0,.4)',
+    ].join(';');
+    const mkBtn = (label, cssExtra) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText =
+        'background:#3a3a40;color:#fff;border:0;border-radius:5px;padding:4px 10px;cursor:pointer;font:12px system-ui,sans-serif' +
+        (cssExtra || '');
+      return b;
+    };
+    const tools = [['pen', 'Pen'], ['arrow', 'Arrow'], ['circle', 'Circle']];
+    const toolBtns = {};
+    for (const [key, label] of tools) {
+      const b = mkBtn(label);
+      if (key === tool) b.style.background = '#1e7a34';
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        tool = key;
+        for (const k of Object.keys(toolBtns)) toolBtns[k].style.background = '#3a3a40';
+        b.style.background = '#1e7a34';
+      });
+      toolBtns[key] = b;
+      toolbar.appendChild(b);
+    }
+    const saveBtn = mkBtn('Save', ';background:#1e7a34');
+    const cancelBtn = mkBtn('Cancel');
+    toolbar.appendChild(saveBtn);
+    toolbar.appendChild(cancelBtn);
+
+    // ---- drawing ----
+    let drawing = false;
+    let startX = 0;
+    let startY = 0;
+    let snapshot = null; // canvas state at mousedown, for live shape preview.
+
+    // Translate a mouse event to canvas pixel coords (canvas is CSS-scaled).
+    const pos = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return {
+        x: (e.clientX - r.left) * (canvas.width / r.width),
+        y: (e.clientY - r.top) * (canvas.height / r.height),
+      };
+    };
+
+    const drawArrow = (x1, y1, x2, y2) => {
+      const head = 12;
+      const ang = Math.atan2(y2 - y1, x2 - x1);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.lineTo(x2 - head * Math.cos(ang - Math.PI / 6), y2 - head * Math.sin(ang - Math.PI / 6));
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - head * Math.cos(ang + Math.PI / 6), y2 - head * Math.sin(ang + Math.PI / 6));
+      ctx.stroke();
+    };
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (!ctx) return;
+      drawing = true;
+      const p = pos(e);
+      startX = p.x; startY = p.y;
+      ctx.strokeStyle = '#e0245e';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      if (tool === 'pen') { ctx.beginPath(); ctx.moveTo(startX, startY); }
+      else { snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height); }
+    });
+    canvas.addEventListener('mousemove', (e) => {
+      if (!drawing || !ctx) return;
+      const p = pos(e);
+      if (tool === 'pen') {
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+      } else {
+        if (snapshot) ctx.putImageData(snapshot, 0, 0); // redraw base for preview.
+        if (tool === 'arrow') drawArrow(startX, startY, p.x, p.y);
+        else if (tool === 'circle') {
+          const rx = Math.abs(p.x - startX) / 2;
+          const ry = Math.abs(p.y - startY) / 2;
+          ctx.beginPath();
+          ctx.ellipse(startX + (p.x - startX) / 2, startY + (p.y - startY) / 2, rx, ry, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    });
+    const endDraw = () => { drawing = false; snapshot = null; };
+    canvas.addEventListener('mouseup', endDraw);
+    canvas.addEventListener('mouseleave', endDraw);
+
+    // ---- save / cancel ----
+    function close() {
+      if (box.parentNode) box.parentNode.removeChild(box);
+      document.removeEventListener('keydown', onKey, true);
+      startTicking(); // resume interval capture.
+    }
+    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
+    document.addEventListener('keydown', onKey, true);
+
+    saveBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      let png;
+      try { png = canvas.toDataURL('image/png'); } catch (e) { png = null; }
+      if (png) send('annotation', { dataUrl: png });
+      close();
+    });
+    cancelBtn.addEventListener('click', (ev) => { ev.stopPropagation(); close(); });
+
+    box.appendChild(toolbar);
+    box.appendChild(canvas);
+    document.documentElement.appendChild(box);
   }
 
   // ---- enable / disable ----------------------------------------------------
