@@ -250,3 +250,19 @@ test('stopping the session removes an open MARK input', async () => {
   await deliver({ type: 'recorder:stop' });
   assert.equal(document.getElementById('__audit_mark_input__'), null, 'MARK input must be removed when the session stops');
 });
+
+// --- environment.json (red): gather + send the context header on start -------
+test('recorder:start sends an environment record with the universal fields', async () => {
+  await deliver({ type: 'recorder:start' });
+  const msg = sent.find((m) => m && m.type === 'environment');
+  assert.ok(msg, 'an environment message must be sent on start');
+  const env = msg.env;
+  assert.ok(env && typeof env === 'object', 'env payload object');
+  assert.ok(env.viewport && typeof env.viewport.w === 'number' && typeof env.viewport.h === 'number');
+  assert.equal(typeof env.dpr, 'number');
+  assert.equal(typeof env.ua, 'string');
+  assert.equal(typeof env.host, 'string');
+  assert.equal(typeof env.url, 'string');
+  assert.equal(typeof env.capturedAt, 'string');
+  assert.ok(env.custom && typeof env.custom === 'object', 'ships a custom hook object (empty by default)');
+});

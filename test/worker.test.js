@@ -142,3 +142,12 @@ test('a captured network failure is stored and appended to the timeline', async 
   const tl = await self.AuditStore.getAll('timeline');
   assert.ok(tl.some((e) => e.type === 'network'), 'network failures must appear in timeline.json');
 });
+
+// --- environment (red): an environment message is stored ---------------------
+test('an environment message is stored for the package', async () => {
+  await send({ type: 'session:start' });
+  await send({ type: 'environment', env: { viewport: { w: 1280, h: 800 }, dpr: 2, zoom: 1, ua: 'x', host: 'h', url: 'u', capturedAt: 't', custom: {} } });
+  const envs = await self.AuditStore.getAll('environment');
+  assert.equal(envs.length, 1, 'the environment record must be stored');
+  assert.equal(envs[0].host, 'h');
+});
