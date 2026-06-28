@@ -182,18 +182,32 @@
     mic.title = 'Dictate';
     mic.style.cssText =
       'background:#3a3a40;color:#fff;border:0;border-radius:5px;padding:5px 8px;cursor:pointer;font:inherit';
+    // Toggle a single recognizer: first click starts, second stops. Held in a
+    // closure var so we never spawn a second recognizer over the first.
+    let rec = null;
     mic.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      if (rec) { rec.stop(); return; } // already listening -> stop.
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SR) return; // graceful no-op when the browser lacks Web Speech.
-      const rec = new SR();
+      rec = new SR();
       rec.lang = 'en-US';
+      rec.continuous = true; // a pause must not end dictation.
       rec.interimResults = true;
       rec.onresult = (e) => {
         let t = '';
         for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
         input.value = t;
       };
+      rec.onend = () => {
+        rec = null;
+        mic.removeAttribute('data-recording');
+        mic.textContent = '🎤';
+        mic.style.background = '#3a3a40';
+      };
+      mic.setAttribute('data-recording', 'true');
+      mic.textContent = '● Listening';
+      mic.style.background = '#dc3434';
       try { rec.start(); } catch (e) { /* already started / not allowed */ }
     });
 
@@ -226,6 +240,9 @@
     window.removeEventListener('hashchange', onNav);
     stopTicking();
     removeOverlay();
+    // Dismiss an open MARK input so it doesn't linger after the session ends.
+    const markInput = document.getElementById('__audit_mark_input__');
+    if (markInput && markInput.parentNode) markInput.parentNode.removeChild(markInput);
   }
 
   // ---- worker -> content messages ------------------------------------------
