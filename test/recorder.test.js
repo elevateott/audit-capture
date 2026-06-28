@@ -55,6 +55,16 @@ const stepCount = () => sent.filter((m) => m && m.type === 'step').length;
 const clickStepCount = () => sent.filter((m) => m && m.type === 'step' && m.step && m.step.type === 'click').length;
 const fireClick = (el) => el.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 
+// The recorder is a singleton module; reset it between tests so state (active
+// flag, an open MARK input, the overlay) doesn't leak across cases.
+test.beforeEach(async () => {
+  await deliver({ type: 'recorder:stop' });
+  ['__audit_mark_input__', '__audit_capture_overlay__', '__audit_toast__'].forEach((id) => {
+    const e = document.getElementById(id);
+    if (e && e.parentNode) e.parentNode.removeChild(e);
+  });
+});
+
 test('recorder:start builds the floating overlay', async () => {
   await deliver({ type: 'recorder:start', intervalMs: 5000 });
   assert.ok(document.getElementById('__audit_capture_overlay__'));
@@ -135,9 +145,9 @@ test('changes on the MARK input are NOT recorded (no self-capture)', async () =>
 function installFakeSR() {
   const created = [];
   class FakeSR {
-    constructor() { created.push(this); this.started = false; this.lang = ''; this.interimResults = false; }
+    constructor() { created.push(this); this.started = false; this.stopped = false; this.lang = ''; this.continuous = false; this.interimResults = false; }
     start() { this.started = true; }
-    stop() {}
+    stop() { this.stopped = true; if (this.onend) this.onend(); }
     // test helper
     _emit(transcript) { if (this.onresult) this.onresult({ results: [[{ transcript }]] }); }
   }
@@ -186,4 +196,57 @@ test('no SpeechRecognition support -> clicking mic does not throw', async () => 
   const mic = document.getElementById('__audit_mark_mic__');
   assert.ok(mic, 'mic control should still render');
   assert.doesNotThrow(() => fireClick(mic));
+});
+
+// --- VOICE refinements (red): continuous, toggle, visible recording state ----
+
+test('dictation is continuous so a pause does not end it', async () => {
+  const c = installFakeSR();
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  fireClick(document.getElementById('__audit_mark_mic__'));
+  assert.equal(c[0].continuous, true, 'recognition must be continuous (survives pauses)');
+  removeSR();
+});
+
+test('clicking the mic while listening stops it (toggle, one recognizer)', async () => {
+  const c = installFakeSR();
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  const mic = document.getElementById('__audit_mark_mic__');
+  fireClick(mic); // start
+  fireClick(mic); // stop
+  assert.equal(c.length, 1, 'a second click must not spawn a new recognizer');
+  assert.equal(c[0].stopped, true, 'a second click must stop recognition');
+  removeSR();
+});
+
+test('mic shows a recording indicator while listening', async () => {
+  installFakeSR();
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  const mic = document.getElementById('__audit_mark_mic__');
+  fireClick(mic);
+  assert.equal(mic.getAttribute('data-recording'), 'true', 'mic must visibly indicate it is listening');
+  removeSR();
+});
+
+test('the recording indicator clears when recognition ends', async () => {
+  const c = installFakeSR();
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  const mic = document.getElementById('__audit_mark_mic__');
+  fireClick(mic);
+  if (c[0].onend) c[0].onend();
+  assert.notEqual(mic.getAttribute('data-recording'), 'true', 'indicator must clear when recognition ends');
+  removeSR();
+});
+
+// --- recorder bug (red): MARK input must be dismissed on session stop --------
+test('stopping the session removes an open MARK input', async () => {
+  await deliver({ type: 'recorder:start' });
+  await deliver({ type: 'recorder:mark-prompt' });
+  assert.ok(document.getElementById('__audit_mark_input__'), 'input is open');
+  await deliver({ type: 'recorder:stop' });
+  assert.equal(document.getElementById('__audit_mark_input__'), null, 'MARK input must be removed when the session stops');
 });
