@@ -1,0 +1,15 @@
+# Captured audit packages — never commit (may contain on-screen secrets)
+/audits/*
+!/audits/.gitkeep
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# No build step in this project (vanilla JS, load-unpacked).
+# If you ever add tooling, ignore its output here.
+node_modules/
+dist/

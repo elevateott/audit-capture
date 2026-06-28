@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Audit Capture",
+  "version": "0.1.0",
+  "description": "Records a web-app walkthrough into a single AI-ready audit package (Phase 1: frames + click spine + MARK + zip export).",
+
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "scripting",
+    "downloads",
+    "storage"
+  ],
+
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "commands": {
+    "toggle-session": {
+      "suggested_key": { "default": "Alt+Shift+A" },
+      "description": "Start/stop audit session"
+    },
+    "mark": {
+      "suggested_key": { "default": "Alt+Shift+M" },
+      "description": "Add a MARK annotation"
+    }
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["lib/selector.js", "content/recorder.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
