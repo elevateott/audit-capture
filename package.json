@@ -1,0 +1,16 @@
+{
+  "name": "audit-capture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DEV TOOLING ONLY. The extension itself has no build step — it loads unpacked as vanilla JS. This package.json exists solely to run the verifier (the loop's fitness function). Nothing here ships in the extension.",
+  "type": "commonjs",
+  "scripts": {
+    "check": "node scripts/check-syntax.mjs",
+    "test": "node --test",
+    "verify": "npm run check && npm test"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^24.1.0"
+  }
+}
