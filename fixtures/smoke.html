@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Audit Capture — smoke test</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 680px; }
+    h2 { margin-top: 1.6rem; border-bottom: 1px solid #ddd; padding-bottom: .2rem; }
+    button { display: inline-block; margin: .3rem .3rem 0 0; padding: .45rem .8rem; cursor: pointer; }
+    code { background: #f2f2f2; padding: 1px 5px; border-radius: 3px; }
+    .hint { color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Audit Capture — smoke test</h1>
+  <p>Current route: <code id="route">/</code></p>
+  <p class="hint">Serve this from localhost, Start a session in the extension, then click through each section.</p>
+
+  <h2>1. Click spine + selectors</h2>
+  <button id="primary-action">Primary (matched by #id)</button>
+  <button data-testid="secondary">Secondary (matched by data-testid, no id)</button>
+  <ul>
+    <li><button class="row">Row one</button></li>
+    <li><button class="row">Row two</button></li>
+    <li><button class="row">Row three (matched by :nth-of-type)</button></li>
+  </ul>
+  <label>Text field (fires a <code>change</code> step on blur):
+    <input id="field" type="text" placeholder="type something, then click away" />
+  </label>
+
+  <h2>2. Routing</h2>
+  <button id="go-dashboard">pushState &rarr; /dashboard</button>
+  <button id="go-settings">pushState &rarr; /settings</button>
+  <p class="hint">Phase 1 records the route on every event, so later frames/clicks carry the new path.
+    Note: pushState does <em>not</em> emit a separate <code>navigate</code> step (the recorder only
+    hooks popstate/hashchange) — that's a known Phase 1 limitation, not a smoke-test failure.</p>
+
+  <h2>3. Console + errors (go to console.txt)</h2>
+  <button id="err">console.error</button>
+  <button id="warn">console.warn</button>
+  <button id="log">console.log (should be DROPPED)</button>
+  <button id="throw">uncaught throw (Runtime.exceptionThrown)</button>
+  <button id="net404">load broken image &rarr; 404 (Log.entryAdded)</button>
+  <div id="imgsink"></div>
+
+  <script>
+    const routeEl = document.getElementById('route');
+    const show = () => { routeEl.textContent = location.pathname; };
+    show();
+    document.getElementById('go-dashboard').onclick = () => { history.pushState({}, '', '/dashboard'); show(); };
+    document.getElementById('go-settings').onclick = () => { history.pushState({}, '', '/settings'); show(); };
+    window.addEventListener('popstate', show);
+
+    document.getElementById('err').onclick = () => console.error('SMOKE console.error sample');
+    document.getElementById('warn').onclick = () => console.warn('SMOKE console.warn sample');
+    document.getElementById('log').onclick = () => console.log('SMOKE console.log sample (should NOT appear in console.txt)');
+    document.getElementById('throw').onclick = () => { /* eslint-disable-next-line */ thisFunctionDoesNotExist(); };
+    document.getElementById('net404').onclick = () => {
+      const img = document.createElement('img');
+      img.src = '/this-resource-does-not-exist-' + Date.now() + '.png';
+      document.getElementById('imgsink').appendChild(img);
+    };
+  </script>
+</body>
+</html>
