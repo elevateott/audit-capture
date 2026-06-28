@@ -151,3 +151,20 @@ test('an environment message is stored for the package', async () => {
   assert.equal(envs.length, 1, 'the environment record must be stored');
   assert.equal(envs[0].host, 'h');
 });
+
+// --- annotation (red): capture-for-draw + store the saved PNG -----------------
+test('annotate:capture returns a screenshot dataUrl', async () => {
+  await send({ type: 'session:start' });
+  const r = await send({ type: 'annotate:capture' }, { tab: { windowId: 1 } });
+  assert.ok(r && r.dataUrl, 'must return a captured dataUrl for the draw surface');
+});
+
+test('an annotation message stores a *_annotated.png and appends a timeline entry', async () => {
+  await send({ type: 'session:start' });
+  await send({ type: 'annotation', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' });
+  const anns = await self.AuditStore.getAll('annotations');
+  assert.equal(anns.length, 1, 'the annotation PNG must be stored');
+  assert.match(anns[0].name, /_annotated\.png$/, 'named <ts>_annotated.png');
+  const tl = await self.AuditStore.getAll('timeline');
+  assert.ok(tl.some((e) => e.type === 'annotation'), 'annotation must appear in timeline.json');
+});

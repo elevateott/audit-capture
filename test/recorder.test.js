@@ -38,6 +38,7 @@ global.chrome = {
       sent.push(msg);
       if (typeof cb === 'function') {
         if (msg && msg.type === 'session:status') cb({ ok: true, session: { active: true, intervalMs: 5000 } });
+        else if (msg && msg.type === 'annotate:capture') { /* canvas draw is browser-gated; don't drive it in jsdom */ }
         else cb({ ok: true });
       }
     },
@@ -277,4 +278,16 @@ test('recorder:start sends an environment record with the universal fields', asy
   assert.equal(typeof env.url, 'string');
   assert.equal(typeof env.capturedAt, 'string');
   assert.ok(env.custom && typeof env.custom === 'object', 'ships a custom hook object (empty by default)');
+});
+
+// --- annotation (red): overlay button requests a capture to draw on ----------
+// The drawing canvas + pen/arrow/circle + canvas->PNG export are browser-gated
+// (jsdom has no canvas/layout); here we only assert the Annotate control exists
+// and clicking it asks the worker for a screen capture.
+test('the overlay has an Annotate button that requests a screen capture', async () => {
+  await deliver({ type: 'recorder:start' });
+  const btn = document.getElementById('__audit_annotate__');
+  assert.ok(btn, 'overlay must have an Annotate button');
+  fireClick(btn);
+  assert.ok(sent.find((m) => m && m.type === 'annotate:capture'), 'clicking Annotate requests a capture');
 });
