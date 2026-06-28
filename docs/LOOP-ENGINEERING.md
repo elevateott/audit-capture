@@ -22,6 +22,33 @@ The loop did its job; the spec was wrong.
 | **Machine-verifiable** | output-package contract (filenames + JSON shapes), pure logic (`selector.js`, `package.js` time/format/ordering), manifest invariants, syntax | **Yes** — this is what the loop runs against |
 | **Human-gated** | load-unpacked in Chrome, real capture, mic permission, the `chrome.debugger` banner, feeding the package to `/audit` (`HANDOFF.md §8`) | **No** — needs a browser + you. Never let the loop claim these as done |
 
+## What the harness CANNOT verify (trust green less here)
+
+The unit harnesses mock `chrome.*` and the DOM. A mock only knows what *you* told it,
+so green proves your logic against your *assumptions*, not against Chrome's real
+behavior. Bugs that live in the gap between the two will pass every test and only show
+up in a browser smoke run. Real examples this project hit, all green-but-broken:
+
+- **CDP timestamp units.** `Runtime`/`Log` timestamps are epoch-ms; `Network.*`
+  timestamps are `MonotonicTime` (seconds since an arbitrary origin). The mock fed
+  comparable fake numbers, so a `since`-filter comparison that drops *every* live
+  network failure passed the suite. Caught only in the browser.
+- **Which CDP events Chrome actually emits.** The mock fires whatever event you tell
+  it to; it can't tell you that, say, uncaught errors arrive via `Runtime.exceptionThrown`
+  (not `consoleAPICalled`) — only a real page proves the event ever fires.
+- **Stale-code / reload.** The browser runs the *previously loaded* extension until you
+  reload the card AND the tab. Tests run the source on disk; they say nothing about
+  what's actually executing in Chrome.
+- **Anything visual/focus/z-index** (overlay rendering, the popup stealing focus, the
+  debugger banner) — jsdom has no layout or real focus model.
+
+Rule of thumb: **the more a change touches a real browser API (`chrome.debugger`,
+`captureVisibleTab`, `getUserMedia`, content-script injection), the less "green" means.**
+For those, a green suite is necessary but not sufficient — always finish with the
+browser smoke test (`docs/SMOKE-TEST.md`) before calling it done.
+
+## Back to the boundary
+
 The loop is *most confident exactly where it's least trustworthy* (browser behavior),
 so the rule is: **narrow the goal to the tier the verifier covers.** Anything browser-only
 stays on the manual checklist below, and the loop is told explicitly not to claim it.
