@@ -64,6 +64,7 @@ test.beforeEach(async () => {
     const e = document.getElementById(id);
     if (e && e.parentNode) e.parentNode.removeChild(e);
   });
+  sent.length = 0; // reset captured messages so order-independent find()s are safe
 });
 
 test('recorder:start builds the floating overlay', async () => {
@@ -108,7 +109,7 @@ test('typing + Enter sends a mark message', async () => {
   const input = document.querySelector('#__audit_mark_input__ textarea');
   input.value = 'MARK 001 — header overlaps, verdict: bug';
   input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  const mark = sent.find((m) => m && m.type === 'mark');
+  const mark = sent.findLast((m) => m && m.type === 'mark');
   assert.ok(mark); assert.match(mark.text, /MARK 001/);
 });
 

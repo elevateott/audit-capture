@@ -237,9 +237,23 @@
       try { rec.start(); } catch (e) { /* already started / not allowed */ }
     });
 
+    // Save: same effect as Enter (submitMark guards empty/whitespace). Lives
+    // inside #__audit_mark_input__, so isOwnUi keeps its click off the spine.
+    const saveBtn = document.createElement('button');
+    saveBtn.id = '__audit_mark_save__';
+    saveBtn.textContent = 'Save';
+    saveBtn.style.cssText =
+      'background:#1e7a34;color:#fff;border:0;border-radius:5px;padding:5px 10px;cursor:pointer;font:inherit';
+    saveBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      submitMark(input.value);
+      close();
+    });
+
     function close() { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }
     wrap.appendChild(input);
     wrap.appendChild(mic);
+    wrap.appendChild(saveBtn);
     document.documentElement.appendChild(wrap);
     input.focus();
   }
