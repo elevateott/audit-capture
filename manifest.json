@@ -9,7 +9,8 @@
     "tabs",
     "scripting",
     "downloads",
-    "storage"
+    "storage",
+    "debugger"
   ],
 
   "host_permissions": [

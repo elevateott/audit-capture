@@ -12,11 +12,16 @@
 importScripts(
   chrome.runtime.getURL('lib/jszip.min.js'),
   chrome.runtime.getURL('lib/store.js'),
-  chrome.runtime.getURL('lib/package.js')
+  chrome.runtime.getURL('lib/package.js'),
+  chrome.runtime.getURL('lib/debugger-tap.js')
 );
 
 const DEFAULT_INTERVAL_MS = 5000;
 const SESSION_KEY = 'session';
+
+// Best-effort current SPA route, fed by inbound content-script messages. The
+// debugger tap has no DOM of its own, so it borrows this for console rows.
+let lastRoute = '/';
 
 // ---- session meta (small, lives in chrome.storage.session) -----------------
 
@@ -97,6 +102,34 @@ async function addMark(text, route) {
   });
 }
 
+// ---- console tap (chrome.debugger, swappable — see lib/debugger-tap.js) -----
+
+async function startConsoleTap(tabId) {
+  if (tabId == null) return;
+  try {
+    await self.AuditDebuggerTap.attach({
+      tabId,
+      getRoute: () => lastRoute,
+      onEvent: (row) => {
+        // Fire-and-forget; a dropped console row must never break capture.
+        self.AuditStore.put('console', row).catch(() => {});
+      },
+    });
+  } catch (e) {
+    // Debugger may be unavailable (another client attached, restricted page).
+    console.warn('[audit] console tap attach failed:', e && e.message);
+  }
+}
+
+async function stopConsoleTap(tabId) {
+  if (tabId == null) return;
+  try {
+    await self.AuditDebuggerTap.detach({ tabId });
+  } catch (e) {
+    /* already detached; ignore */
+  }
+}
+
 // ---- session control -------------------------------------------------------
 
 async function startSession(tab) {
@@ -112,6 +145,9 @@ async function startSession(tab) {
     tabId: tab ? tab.id : null,
   };
   await setSession(session);
+
+  // Attach the console tap (Phase 2). Shows the "is being debugged" banner.
+  await startConsoleTap(session.tabId);
 
   // First step: setViewport, so recording.json matches DevTools Recorder shape.
   await appendStep({ type: 'setViewport', title: session.title });
@@ -143,6 +179,9 @@ async function stopSession() {
       /* tab may be gone; ignore */
     }
   }
+
+  // Detach the console tap so the debugger banner clears.
+  await stopConsoleTap(session.tabId);
 
   session.active = false;
   await setSession(session);
@@ -178,6 +217,7 @@ async function stopSession() {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     const route = (msg && msg.route) || '/';
+    if (msg && msg.route) lastRoute = msg.route;
     const windowId = sender.tab ? sender.tab.windowId : undefined;
 
     switch (msg && msg.type) {
