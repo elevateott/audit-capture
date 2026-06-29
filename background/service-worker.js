@@ -90,10 +90,23 @@ async function appendStep(step) {
 
 async function addMark(text, route) {
   const session = await getSession();
-  if (!session || !session.active) return;
+  if (!session || !session.active) return null;
   const t = Date.now();
+
+  // The worker assigns the id now, so strip any leading id the operator still
+  // typed (habit, or dictation reading the old placeholder) to avoid a double
+  // prefix like "MARK 001 — MARK 7 — ...". Matches "MARK <n> — " / "- " / "– ".
+  const body = String(text || '').replace(/^\s*MARK\s+\d+\s*[—–-]\s*/i, '');
+
+  // Sequential, zero-padded, regex-extractable id (MARK 001, 002, ...). Persisted
+  // in session state so it survives the worker dying between marks.
+  const n = (session.markCount || 0) + 1;
+  const id = String(n).padStart(3, '0');
+  session.markCount = n;
+  await setSession(session);
+
   const line =
-    '[' + self.AuditPackage.clock(t) + '] (' + (route || '/') + ') ' + text;
+    '[' + self.AuditPackage.clock(t) + '] (' + (route || '/') + ') MARK ' + id + ' — ' + body;
   await self.AuditStore.put('narration', { line, t });
   await appendTimeline({
     t,
@@ -101,6 +114,7 @@ async function addMark(text, route) {
     type: 'mark',
     ref: session.lastFrame || null,
   });
+  return id;
 }
 
 // ---- console tap (chrome.debugger, swappable — see lib/debugger-tap.js) -----
@@ -207,6 +221,7 @@ async function startSession(tab) {
     title: (tab && tab.title) || 'audit',
     intervalMs: DEFAULT_INTERVAL_MS,
     frameCount: 0,
+    markCount: 0,
     lastFrame: null,
     windowId: tab ? tab.windowId : chrome.windows.WINDOW_ID_CURRENT,
     tabId: tab ? tab.id : null,
@@ -331,8 +346,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
       case 'mark': {
-        await addMark(msg.text, route);
-        sendResponse({ ok: true });
+        const id = await addMark(msg.text, route);
+        sendResponse({ ok: true, id });
         break;
       }
       case 'environment': {

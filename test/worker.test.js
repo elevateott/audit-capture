@@ -161,6 +161,36 @@ test('a mark message writes narration and a timeline mark entry', async () => {
   assert.ok(tl.some((e) => e.type === 'mark'), 'a mark timeline entry must exist');
 });
 
+// --- auto-numbering (red): the worker assigns sequential MARK ids -------------
+test('marks are auto-numbered MARK 001, then MARK 002 within a session', async () => {
+  await send({ type: 'session:start' });
+  const r1 = await send({ type: 'mark', text: 'featured image missing, verdict: bug', route: '/a' });
+  const r2 = await send({ type: 'mark', text: 'spacing off, verdict: nit', route: '/b' });
+  assert.equal(r1.id, '001', 'first mark is 001');
+  assert.equal(r2.id, '002', 'second mark is 002');
+  const lines = (await self.AuditStore.getAll('narration')).map((n) => n.line);
+  assert.ok(lines.some((l) => /MARK 001 — featured image missing, verdict: bug/.test(l)));
+  assert.ok(lines.some((l) => /MARK 002 — spacing off, verdict: nit/.test(l)));
+});
+
+test('a fresh session resets MARK numbering to 001', async () => {
+  await send({ type: 'session:start' });
+  await send({ type: 'mark', text: 'first', route: '/a' });
+  await send({ type: 'session:start' }); // new session wipes the store + counter
+  const r = await send({ type: 'mark', text: 'first of the new session', route: '/a' });
+  assert.equal(r.id, '001', 'numbering restarts each session');
+});
+
+test('a hand-typed id is stripped so it is not double-prefixed', async () => {
+  await send({ type: 'session:start' });
+  const r = await send({ type: 'mark', text: 'MARK 7 — foo', route: '/a' });
+  assert.equal(r.id, '001', 'the worker assigns the id regardless of what was typed');
+  const narration = await self.AuditStore.getAll('narration');
+  assert.equal(narration.length, 1);
+  assert.match(narration[0].line, /MARK 001 — foo$/, 'single, worker-assigned prefix');
+  assert.doesNotMatch(narration[0].line, /MARK 7/, 'the typed id is gone');
+});
+
 // --- MARK command feedback: a swallowed keypress must become VISIBLE ---------
 test('MARK command on an active session asks the page to prompt, no error badge', async () => {
   await send({ type: 'session:start' });
