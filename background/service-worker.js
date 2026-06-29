@@ -150,6 +150,53 @@ async function stopConsoleTap(tabId) {
   }
 }
 
+// ---- multi-tab tap follow ---------------------------------------------------
+// An audit can span tabs (open the storefront in a new tab while the CMS session
+// runs). The tap FOLLOWS the audit: attach to each in-scope tab as it becomes the
+// focused tab, and detach everything on stop. The set of attached tabs lives in
+// session state (not worker memory) so it survives a worker restart mid-session.
+
+async function ensureTapForTab(tabId) {
+  if (tabId == null) return;
+  const session = await getSession();
+  if (!session || !session.active) return;
+
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch (e) {
+    return; // tab vanished between the event and now.
+  }
+  // Only http(s) pages we're allowed to audit — never chrome://, restricted, or
+  // denylisted hosts (same scope gate the recorder uses).
+  if (!tab || !tab.url || !self.AuditScope.inScope(tab.url)) return;
+
+  const attached = session.attachedTabs || [];
+  if (attached.includes(tabId)) return; // already tapped — don't stack listeners.
+
+  // since = now drops the pre-attach events Chrome replays on attach.
+  await startConsoleTap(tabId, Date.now());
+
+  attached.push(tabId);
+  session.attachedTabs = attached;
+  await setSession(session);
+}
+
+// Drop a tab from the follow-list when it closes or the debugger detaches out
+// from under us. The tap's own onDetach already cleaned its listeners; this just
+// keeps session.attachedTabs honest so stop doesn't try to detach a dead tab.
+async function forgetTab(tabId) {
+  if (tabId == null) return;
+  const session = await getSession();
+  if (!session || !session.active) return;
+  const attached = session.attachedTabs || [];
+  const i = attached.indexOf(tabId);
+  if (i < 0) return;
+  attached.splice(i, 1);
+  session.attachedTabs = attached;
+  await setSession(session);
+}
+
 // ---- session control -------------------------------------------------------
 
 async function startSession(tab) {
@@ -169,6 +216,9 @@ async function startSession(tab) {
   // Attach the console tap (Phase 2). Shows the "is being debugged" banner.
   // `since` drops pre-session events Chrome replays on attach.
   await startConsoleTap(session.tabId, session.startedAt);
+  // Seed the follow-list with the start tab; onActivated/onUpdated add the rest.
+  session.attachedTabs = session.tabId != null ? [session.tabId] : [];
+  await setSession(session);
 
   // First step: setViewport, so recording.json matches DevTools Recorder shape.
   await appendStep({ type: 'setViewport', title: session.title });
@@ -201,8 +251,15 @@ async function stopSession() {
     }
   }
 
-  // Detach the console tap so the debugger banner clears.
-  await stopConsoleTap(session.tabId);
+  // Detach the tap from EVERY tab we attached to during the audit, so each
+  // debugger banner clears — not just the tab the session started on. Fall back
+  // to the start tab for sessions persisted before attachedTabs existed.
+  const attached = session.attachedTabs ||
+    (session.tabId != null ? [session.tabId] : []);
+  for (const tabId of attached) {
+    await stopConsoleTap(tabId);
+  }
+  session.attachedTabs = [];
 
   session.active = false;
   await setSession(session);
@@ -334,6 +391,31 @@ chrome.commands.onCommand.addListener(async (command) => {
   } else if (command === 'mark') {
     await handleMarkCommand(tab);
   }
+});
+
+// ---- tab follow listeners ---------------------------------------------------
+// These fire even while the worker is asleep — Chrome wakes it to deliver them,
+// so the tap can attach to a tab the operator focuses long after Start. All are
+// fire-and-forget; ensureTapForTab/forgetTab no-op when no session is active.
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  ensureTapForTab(activeInfo.tabId);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // 'complete' covers both a navigation within an attached tab and a brand-new
+  // tab finishing its first load; earlier statuses lack a settled URL.
+  if (changeInfo.status === 'complete') ensureTapForTab(tabId);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  forgetTab(tabId);
+});
+
+chrome.debugger.onDetach.addListener((source) => {
+  // DevTools opened on the tab, the tab crashed, etc. The tap's own onDetach
+  // handler already removed its listeners; just keep our follow-list honest.
+  if (source && source.tabId != null) forgetTab(source.tabId);
 });
 
 // MARK is the capture surface used most, so a swallowed keypress is the worst

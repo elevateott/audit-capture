@@ -39,14 +39,26 @@ function makeChrome() {
   const sessionData = {};
   const dbgEvent = [];
   const dbgDetach = [];
-  const calls = { capture: 0, download: [], tabMessages: [], badge: [] };
+  const tabActivated = [];
+  const tabUpdated = [];
+  const tabRemoved = [];
+  // attach/detach record the tabIds the debugger tap touched (spy on the tap).
+  const calls = { capture: 0, download: [], tabMessages: [], badge: [], attach: [], detach: [] };
+  // Tabs the worker can chrome.tabs.get(). The start tab (1) is in scope; tests
+  // add more (a second in-scope tab, a chrome:// tab) by mutating chrome._tabs.
+  const tabsById = { 1: { id: 1, windowId: 1, title: 'Smoke', url: 'http://localhost:8000/cms' } };
   const chrome = {
     action: {
       setBadgeBackgroundColor: async () => {},
       setBadgeText: async ({ text }) => { calls.badge.push(text); },
     },
     _calls: calls,
+    _tabs: tabsById,
     _fireDbg: (src, method, params) => { for (const f of [...dbgEvent]) f(src, method, params); },
+    _fireDetach: (src) => { for (const f of [...dbgDetach]) f(src); },
+    _fireActivated: (tabId) => { for (const f of [...tabActivated]) f({ tabId }); },
+    _fireUpdated: (tabId, changeInfo) => { for (const f of [...tabUpdated]) f(tabId, changeInfo, chrome._tabs[tabId] || {}); },
+    _fireRemoved: (tabId) => { for (const f of [...tabRemoved]) f(tabId, {}); },
     runtime: {
       getURL: (p) => p,
       onMessage: { addListener: (f) => { chrome._msg = f; } },
@@ -66,6 +78,14 @@ function makeChrome() {
       },
       sendMessage: async (id, msg) => { calls.tabMessages.push({ id, msg }); },
       query: async () => [{ id: 1, windowId: 1, title: 'Smoke' }],
+      get: async (id) => {
+        const t = tabsById[id];
+        if (!t) throw new Error('No tab with id ' + id);
+        return t;
+      },
+      onActivated: { addListener: (f) => tabActivated.push(f) },
+      onUpdated: { addListener: (f) => tabUpdated.push(f) },
+      onRemoved: { addListener: (f) => tabRemoved.push(f) },
     },
     downloads: { download: async (o) => { calls.download.push(o); } },
     debugger: {
@@ -77,9 +97,9 @@ function makeChrome() {
         addListener: (f) => dbgDetach.push(f),
         removeListener: (f) => { const i = dbgDetach.indexOf(f); if (i >= 0) dbgDetach.splice(i, 1); },
       },
-      attach: async () => {},
+      attach: async (target) => { calls.attach.push(target && target.tabId); },
       sendCommand: async () => {},
-      detach: async () => {},
+      detach: async (target) => { calls.detach.push(target && target.tabId); },
     },
     commands: { onCommand: { addListener: (f) => { chrome._cmd = f; } } },
     windows: { WINDOW_ID_CURRENT: -2 },
@@ -187,6 +207,51 @@ test('a captured network failure is stored and appended to the timeline', async 
   assert.equal(net.length, 1, 'failed request must be stored');
   const tl = await self.AuditStore.getAll('timeline');
   assert.ok(tl.some((e) => e.type === 'network'), 'network failures must appear in timeline.json');
+});
+
+// --- multi-tab tap follow (red): the tap follows the focused in-scope tab -----
+// An audit can span tabs (CMS + storefront). The tap must attach to each in-scope
+// tab as it is focused and detach every one on stop. attach/detach record tabIds.
+
+test('starting a session attaches the tap to the start tab', async () => {
+  global.chrome._calls.attach.length = 0;
+  await send({ type: 'session:start' });
+  assert.ok(global.chrome._calls.attach.includes(1), 'the start tab must be tapped');
+  const sess = (await global.chrome.storage.session.get('session')).session;
+  assert.deepEqual(sess.attachedTabs, [1], 'attachedTabs is seeded with the start tab');
+});
+
+test('activating a second in-scope tab attaches the tap to it', async () => {
+  global.chrome._tabs[2] = { id: 2, windowId: 1, title: 'Store', url: 'http://localhost:8000/store' };
+  await send({ type: 'session:start' });
+  global.chrome._calls.attach.length = 0;
+  global.chrome._fireActivated(2); // operator focuses the storefront tab
+  await delay(50);
+  assert.ok(global.chrome._calls.attach.includes(2), 'focusing a new in-scope tab taps it');
+  const sess = (await global.chrome.storage.session.get('session')).session;
+  assert.ok(sess.attachedTabs.includes(2), 'attachedTabs records the second tab');
+});
+
+test('a chrome:// (out-of-scope) tab is NOT attached', async () => {
+  global.chrome._tabs[3] = { id: 3, windowId: 1, title: 'Ext', url: 'chrome://extensions' };
+  await send({ type: 'session:start' });
+  global.chrome._calls.attach.length = 0;
+  global.chrome._fireActivated(3);
+  await delay(50);
+  assert.ok(!global.chrome._calls.attach.includes(3), 'out-of-scope tabs must never be tapped');
+  const sess = (await global.chrome.storage.session.get('session')).session;
+  assert.ok(!sess.attachedTabs.includes(3), 'attachedTabs must not record an out-of-scope tab');
+});
+
+test('stopping the session detaches the tap from every attached tab', async () => {
+  global.chrome._tabs[2] = { id: 2, windowId: 1, title: 'Store', url: 'http://localhost:8000/store' };
+  await send({ type: 'session:start' });
+  global.chrome._fireActivated(2);
+  await delay(50);
+  global.chrome._calls.detach.length = 0;
+  await send({ type: 'session:stop' });
+  assert.ok(global.chrome._calls.detach.includes(1), 'the start tab is detached on stop');
+  assert.ok(global.chrome._calls.detach.includes(2), 'the second tab is detached on stop');
 });
 
 // --- environment (red): an environment message is stored ---------------------
