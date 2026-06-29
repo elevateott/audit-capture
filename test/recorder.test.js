@@ -27,8 +27,23 @@ global.location = dom.window.location;
 global.Node = dom.window.Node;
 global.Element = dom.window.Element;
 
-global.setInterval = () => 1;
+// Count startTicking() calls: startTicking is the ONLY caller of setInterval, so
+// this lets the visibility tests assert whether the capture interval started.
+let intervalStarts = 0;
+global.setInterval = () => { intervalStarts++; return 1; };
 global.clearInterval = () => {};
+
+// jsdom's default visibilityState is 'prerender'; stub it so the recorder's
+// foreground-only gating is testable. (The real check is document.visibilityState
+// === 'visible'.)
+function setVisibility(state) {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+  Object.defineProperty(document, 'hidden', { value: state !== 'visible', configurable: true });
+}
+
+// The recorder requires window.AuditScope (loaded before it in the manifest);
+// provide the real one so its scope gate runs against the jsdom URL (in scope).
+global.window.AuditScope = require('../lib/scope.js');
 
 const sent = [];
 global.chrome = {
@@ -304,4 +319,67 @@ test('the overlay has an Annotate button that requests a screen capture', async 
   assert.ok(btn, 'overlay must have an Annotate button');
   fireClick(btn);
   assert.ok(sent.find((m) => m && m.type === 'annotate:capture'), 'clicking Annotate requests a capture');
+});
+
+// --- scope gating (red): only capture on in-scope pages ----------------------
+// captureVisibleTab grabs the focused tab, so a session must NOT greedily start
+// recording on every tab/host you focus. enable() is gated on AuditScope.inScope.
+
+test('an out-of-scope page does not enable on recorder:start', async () => {
+  const real = window.AuditScope;
+  window.AuditScope = { inScope: () => false, DENYLIST: [] };
+  try {
+    await deliver({ type: 'recorder:start', intervalMs: 5000 });
+    assert.equal(document.getElementById('__audit_capture_overlay__'), null,
+      'recorder must not enable (no overlay) on an out-of-scope page');
+  } finally {
+    window.AuditScope = real;
+  }
+});
+
+test('an out-of-scope page does not self-resume on session:status', () => {
+  // The session:status resume is a one-shot at module load, so re-load a fresh
+  // recorder instance under a forced out-of-scope condition (the chrome mock
+  // replies active:true) and assert it does NOT resume capture.
+  const real = window.AuditScope;
+  ['__audit_capture_overlay__', '__audit_mark_input__'].forEach((id) => {
+    const e = document.getElementById(id); if (e && e.parentNode) e.parentNode.removeChild(e);
+  });
+  window.AuditScope = { inScope: () => false, DENYLIST: [] };
+  delete require.cache[require.resolve('../content/recorder.js')];
+  require('../content/recorder.js'); // triggers the session:status resume attempt
+  assert.equal(document.getElementById('__audit_capture_overlay__'), null,
+    'an out-of-scope page must not resume capture on session:status');
+
+  // Restore a real, in-scope instance so the rest of the suite is unaffected.
+  window.AuditScope = real;
+  const ov = document.getElementById('__audit_capture_overlay__');
+  if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+  delete require.cache[require.resolve('../content/recorder.js')];
+  require('../content/recorder.js');
+});
+
+// --- foreground-only ticking (red): only tick while the tab is visible -------
+
+test('a hidden tab does not start the capture interval', async () => {
+  setVisibility('hidden');
+  intervalStarts = 0;
+  await deliver({ type: 'recorder:start', intervalMs: 5000 });
+  assert.equal(intervalStarts, 0, 'a backgrounded tab must not tick');
+});
+
+test('a visible tab starts the capture interval', async () => {
+  setVisibility('visible');
+  intervalStarts = 0;
+  await deliver({ type: 'recorder:start', intervalMs: 5000 });
+  assert.ok(intervalStarts > 0, 'a foreground tab must tick');
+});
+
+test('becoming visible while active starts ticking (visibilitychange)', async () => {
+  setVisibility('hidden');
+  await deliver({ type: 'recorder:start', intervalMs: 5000 });
+  intervalStarts = 0;
+  setVisibility('visible');
+  document.dispatchEvent(new dom.window.Event('visibilitychange'));
+  assert.ok(intervalStarts > 0, 'gaining focus mid-session must start the interval');
 });

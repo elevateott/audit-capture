@@ -51,7 +51,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["lib/selector.js", "content/recorder.js"],
+      "js": ["lib/scope.js", "lib/selector.js", "content/recorder.js"],
       "run_at": "document_idle"
     }
   ]

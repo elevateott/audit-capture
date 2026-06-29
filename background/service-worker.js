@@ -10,6 +10,7 @@
 
 // Classic (non-module) worker, so importScripts is available.
 importScripts(
+  chrome.runtime.getURL('lib/scope.js'),
   chrome.runtime.getURL('lib/jszip.min.js'),
   chrome.runtime.getURL('lib/store.js'),
   chrome.runtime.getURL('lib/package.js'),

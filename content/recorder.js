@@ -35,6 +35,17 @@
     intervalId = null;
   }
 
+  // Foreground-only ticking. chrome.tabs.captureVisibleTab always grabs the
+  // FOCUSED tab, so a background tab's interval would screenshot whatever tab is
+  // visible and mislabel the frame with this tab's route. Only tick while we are
+  // the visible tab; the visibilitychange listener flips us as focus moves.
+  function applyTickingForVisibility() {
+    if (active && document.visibilityState === 'visible') startTicking(currentIntervalMs);
+    else stopTicking();
+  }
+  // Registered once, for the lifetime of the page (cheap no-op while inactive).
+  document.addEventListener('visibilitychange', applyTickingForVisibility);
+
   // ---- click spine ---------------------------------------------------------
 
   // Our own overlay/MARK input live in the page; never record interactions
@@ -391,7 +402,7 @@
     function close() {
       if (box.parentNode) box.parentNode.removeChild(box);
       document.removeEventListener('keydown', onKey, true);
-      startTicking(); // resume interval capture.
+      applyTickingForVisibility(); // resume interval capture, but only if foreground.
     }
     function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
     document.addEventListener('keydown', onKey, true);
@@ -415,12 +426,14 @@
   function enable(intervalMs) {
     if (active) return;
     active = true;
+    currentIntervalMs = intervalMs || currentIntervalMs;
     lastRoute = route();
     document.addEventListener('click', onClick, true);
     document.addEventListener('change', onChange, true);
     window.addEventListener('popstate', onNav);
     window.addEventListener('hashchange', onNav);
-    startTicking(intervalMs);
+    // Foreground-only: tick now if we are the visible tab, else wait for focus.
+    applyTickingForVisibility();
     buildOverlay();
     sendEnvironment();
   }
@@ -460,7 +473,11 @@
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg && msg.type) {
       case 'recorder:start':
-        enable(msg.intervalMs);
+        // Only self-enable on in-scope pages (a denylisted host stays dark even
+        // if the worker broadcasts a start).
+        if (window.AuditScope && window.AuditScope.inScope(location.href)) {
+          enable(msg.intervalMs);
+        }
         sendResponse({ ok: true });
         break;
       case 'recorder:stop':
@@ -482,7 +499,11 @@
   chrome.runtime.sendMessage({ type: 'session:status' }, (resp) => {
     if (chrome.runtime.lastError) return;
     if (resp && resp.ok && resp.session && resp.session.active) {
-      enable(resp.session.intervalMs);
+      // A live session resumes capture only on in-scope pages -- otherwise every
+      // tab you focus during a session would greedily start recording.
+      if (window.AuditScope && window.AuditScope.inScope(location.href)) {
+        enable(resp.session.intervalMs);
+      }
     }
   });
 })();
