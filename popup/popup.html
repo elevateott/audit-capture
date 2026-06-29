@@ -27,8 +27,15 @@
     #start { background: #2e7d32; color: #fff; }
     #stop  { background: #dc3434; color: #fff; }
     button:disabled { opacity: .45; cursor: default; }
-    .statusrow { font-size: 12px; min-height: 16px; }
-    #status { opacity: .85; }
+    #status { font-size: 12px; opacity: .85; min-height: 16px; }
+    #elapsed {
+      font-size: 26px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: .5px;
+      margin: 2px 0 4px;
+      min-height: 30px;
+    }
     #elapsed { font-variant-numeric: tabular-nums; opacity: .7; }
     .hint { font-size: 11px; opacity: .55; margin-top: 8px; }
     code { background: #000; padding: 1px 4px; border-radius: 3px; }
@@ -38,7 +45,8 @@
   <h1>Audit Capture</h1>
   <button id="start">Start session</button>
   <button id="stop" disabled>Stop &amp; export</button>
-  <div class="statusrow"><span id="status">Idle.</span> <span id="elapsed"></span></div>
+  <div id="elapsed"></div>
+  <div id="status">Idle.</div>
   <div class="hint">
     MARK: <code>Alt+Shift+M</code> &middot; Toggle: <code>Alt+Shift+A</code>
   </div>
