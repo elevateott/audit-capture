@@ -9,6 +9,14 @@
 (function () {
   'use strict';
 
+  // The worker now programmatically injects this file into in-scope tabs (so a
+  // tab open BEFORE the session started — which the static content_scripts never
+  // reached — still gets a recorder). A freshly-loaded in-scope tab therefore
+  // receives BOTH the static injection and the programmatic one; this guard makes
+  // the second evaluation a no-op so we don't stack a duplicate overlay/listeners.
+  if (window.__auditCaptureRecorderLoaded) return;
+  window.__auditCaptureRecorderLoaded = true;
+
   let intervalId = null;
   let active = false;
   let currentIntervalMs = 5000; // last interval, so the annotator can resume it.

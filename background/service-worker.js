@@ -197,6 +197,39 @@ async function ensureTapForTab(tabId) {
   await setSession(session);
 }
 
+// Programmatic recorder injection. Static content_scripts only inject into tabs
+// that loaded AFTER the extension; a tab already open when the session started
+// has no recorder, so a MARK there silently no-ops and nothing captures. Inject
+// it ourselves the moment an in-scope tab becomes part of the session — whether
+// it was opened before or after Start. Idempotent: the recorder's
+// __auditCaptureRecorderLoaded guard makes a double-inject (static + this) a
+// no-op, and the injected recorder self-resumes via its own session:status
+// check, so no recorder:start is needed here.
+async function ensureRecorderForTab(tabId) {
+  if (tabId == null) return;
+  const session = await getSession();
+  if (!session || !session.active) return; // no session -> nothing to inject
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch (e) {
+    return; // tab vanished between the event and now.
+  }
+  // Same scope gate the tap uses: http(s) only, never chrome://, restricted, or
+  // denylisted hosts.
+  if (!tab || !tab.url || !/^https?:/.test(tab.url)) return;
+  if (!self.AuditScope.inScope(tab.url)) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['lib/scope.js', 'lib/selector.js', 'content/recorder.js'],
+    });
+  } catch (e) {
+    // Tab navigating / restricted / gone — ignore. host_permissions already
+    // cover http(s), so this needs no extra permission or user gesture.
+  }
+}
+
 // Drop a tab from the follow-list when it closes or the debugger detaches out
 // from under us. The tap's own onDetach already cleaned its listeners; this just
 // keeps session.attachedTabs honest so stop doesn't try to detach a dead tab.
@@ -240,6 +273,9 @@ async function startSession(tab) {
   await appendStep({ type: 'setViewport', title: session.title });
 
   if (tab && tab.id != null) {
+    // Make sure the recorder is actually present first: a start tab that predates
+    // the extension never got the static content script. Idempotent if it did.
+    await ensureRecorderForTab(tab.id);
     try {
       await chrome.tabs.sendMessage(tab.id, {
         type: 'recorder:start',
@@ -354,7 +390,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'environment': {
         // One-time context header, NOT a timed event — store it, but do NOT
         // append a timeline entry (unlike console/network).
-        await self.AuditStore.put('environment', msg.env);
+        //
+        // FIRST-WINS: multiple in-scope tabs each send 'environment' on enable
+        // now (the worker injects/resumes the recorder in pre-existing tabs too).
+        // Keep only the FIRST — the page where the audit started — so
+        // environment.json stays the session-start context, not whatever tab was
+        // focused last. (Store-backed so it survives a worker restart mid-audit.)
+        const existingEnv = await self.AuditStore.getAll('environment');
+        if (!existingEnv || existingEnv.length === 0) {
+          await self.AuditStore.put('environment', msg.env);
+        }
         sendResponse({ ok: true });
         break;
       }
@@ -415,13 +460,19 @@ chrome.commands.onCommand.addListener(async (command) => {
 // fire-and-forget; ensureTapForTab/forgetTab no-op when no session is active.
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
+  // A focused in-scope tab needs BOTH the recorder (to capture/accept MARKs) and
+  // the debugger tap (console/network), whether it predates the session or not.
+  ensureRecorderForTab(activeInfo.tabId);
   ensureTapForTab(activeInfo.tabId);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   // 'complete' covers both a navigation within an attached tab and a brand-new
   // tab finishing its first load; earlier statuses lack a settled URL.
-  if (changeInfo.status === 'complete') ensureTapForTab(tabId);
+  if (changeInfo.status === 'complete') {
+    ensureRecorderForTab(tabId);
+    ensureTapForTab(tabId);
+  }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {

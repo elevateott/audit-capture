@@ -43,7 +43,7 @@ function makeChrome() {
   const tabUpdated = [];
   const tabRemoved = [];
   // attach/detach record the tabIds the debugger tap touched (spy on the tap).
-  const calls = { capture: 0, download: [], tabMessages: [], badge: [], attach: [], detach: [] };
+  const calls = { capture: 0, download: [], tabMessages: [], badge: [], attach: [], detach: [], inject: [] };
   // Tabs the worker can chrome.tabs.get(). The start tab (1) is in scope; tests
   // add more (a second in-scope tab, a chrome:// tab) by mutating chrome._tabs.
   const tabsById = { 1: { id: 1, windowId: 1, title: 'Smoke', url: 'http://localhost:8000/cms' } };
@@ -94,6 +94,12 @@ function makeChrome() {
       onRemoved: { addListener: (f) => tabRemoved.push(f) },
     },
     downloads: { download: async (o) => { calls.download.push(o); } },
+    scripting: {
+      // Records each programmatic recorder injection (tabId + files in order).
+      executeScript: async ({ target, files }) => {
+        calls.inject.push({ tabId: target && target.tabId, files });
+      },
+    },
     debugger: {
       onEvent: {
         addListener: (f) => dbgEvent.push(f),
@@ -323,6 +329,46 @@ test('stopping the session detaches the tap from every attached tab', async () =
   assert.ok(global.chrome._calls.detach.includes(2), 'the second tab is detached on stop');
 });
 
+// --- recorder injection (red): the worker injects the recorder into in-scope --
+// tabs so a tab open BEFORE the session started (which the static content_scripts
+// never reached) still captures and accepts MARKs. Idempotent (recorder guard).
+
+test('starting a session injects the recorder into the start tab', async () => {
+  global.chrome._calls.inject.length = 0;
+  await send({ type: 'session:start' });
+  const inj = global.chrome._calls.inject.find((i) => i.tabId === 1);
+  assert.ok(inj, 'the start tab must be injected');
+  assert.deepEqual(
+    inj.files,
+    ['lib/scope.js', 'lib/selector.js', 'content/recorder.js'],
+    'files inject in dependency order'
+  );
+});
+
+test('activating an in-scope tab injects the recorder into it', async () => {
+  global.chrome._tabs[2] = { id: 2, windowId: 1, title: 'Store', url: 'http://localhost:8000/store' };
+  await send({ type: 'session:start' });
+  global.chrome._calls.inject.length = 0;
+  global.chrome._fireActivated(2); // operator focuses an already-open storefront tab
+  await delay(50);
+  assert.ok(
+    global.chrome._calls.inject.some((i) => i.tabId === 2),
+    'focusing an in-scope tab injects the recorder into it'
+  );
+});
+
+test('a chrome:// (out-of-scope) tab is NOT injected', async () => {
+  global.chrome._tabs[3] = { id: 3, windowId: 1, title: 'Ext', url: 'chrome://extensions' };
+  await send({ type: 'session:start' });
+  global.chrome._calls.inject.length = 0;
+  global.chrome._fireActivated(3);
+  await delay(50);
+  assert.ok(
+    !global.chrome._calls.inject.some((i) => i.tabId === 3),
+    'out-of-scope tabs must never be injected'
+  );
+});
+
 // --- environment (red): an environment message is stored ---------------------
 test('an environment message is stored for the package', async () => {
   await send({ type: 'session:start' });
@@ -330,6 +376,17 @@ test('an environment message is stored for the package', async () => {
   const envs = await self.AuditStore.getAll('environment');
   assert.equal(envs.length, 1, 'the environment record must be stored');
   assert.equal(envs[0].host, 'h');
+});
+
+// Now that several tabs each send 'environment' on enable, the context header
+// must stay the session-START page, not whatever tab was focused last.
+test('a second environment message does not overwrite the first (first-wins)', async () => {
+  await send({ type: 'session:start' }); // clearAll -> environment store starts empty
+  await send({ type: 'environment', env: { viewport: { w: 1, h: 1 }, dpr: 1, zoom: 1, ua: 'a', host: 'start-page', url: 'u1', capturedAt: 't1', custom: {} } });
+  await send({ type: 'environment', env: { viewport: { w: 2, h: 2 }, dpr: 1, zoom: 1, ua: 'b', host: 'other-tab', url: 'u2', capturedAt: 't2', custom: {} } });
+  const envs = await self.AuditStore.getAll('environment');
+  assert.equal(envs.length, 1, 'environment.json stays a single record');
+  assert.equal(envs[0].host, 'start-page', 'the FIRST (session-start) environment wins');
 });
 
 // --- annotation (red): capture-for-draw + store the saved PNG -----------------

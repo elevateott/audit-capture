@@ -361,6 +361,9 @@ test('an out-of-scope page does not self-resume on session:status', () => {
     const e = document.getElementById(id); if (e && e.parentNode) e.parentNode.removeChild(e);
   });
   window.AuditScope = { inScope: () => false, DENYLIST: [] };
+  // Reset the idempotency guard so the IIFE actually re-runs (it would otherwise
+  // early-return on the second load and the resume attempt wouldn't fire).
+  delete window.__auditCaptureRecorderLoaded;
   delete require.cache[require.resolve('../content/recorder.js')];
   require('../content/recorder.js'); // triggers the session:status resume attempt
   assert.equal(document.getElementById('__audit_capture_overlay__'), null,
@@ -370,6 +373,7 @@ test('an out-of-scope page does not self-resume on session:status', () => {
   window.AuditScope = real;
   const ov = document.getElementById('__audit_capture_overlay__');
   if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+  delete window.__auditCaptureRecorderLoaded;
   delete require.cache[require.resolve('../content/recorder.js')];
   require('../content/recorder.js');
 });
@@ -397,4 +401,19 @@ test('becoming visible while active starts ticking (visibilitychange)', async ()
   setVisibility('visible');
   document.dispatchEvent(new dom.window.Event('visibilitychange'));
   assert.ok(intervalStarts > 0, 'gaining focus mid-session must start the interval');
+});
+
+// --- idempotent injection (red): a freshly-loaded in-scope tab gets BOTH the ---
+// static content script AND the worker's programmatic injection. The
+// __auditCaptureRecorderLoaded guard must make the second evaluation a no-op so
+// we don't stack a duplicate overlay/listener set.
+test('loading the recorder a second time is a no-op (idempotency guard)', () => {
+  assert.equal(window.__auditCaptureRecorderLoaded, true, 'guard flag is set after the first load');
+  // Re-evaluate the IIFE WITHOUT resetting the guard (as a re-injection into an
+  // already-injected tab would): it must early-return and add no second overlay.
+  const before = document.querySelectorAll('#__audit_capture_overlay__').length;
+  delete require.cache[require.resolve('../content/recorder.js')];
+  require('../content/recorder.js');
+  const after = document.querySelectorAll('#__audit_capture_overlay__').length;
+  assert.equal(after, before, 're-injection must not add a duplicate overlay');
 });
