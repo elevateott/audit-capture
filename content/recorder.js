@@ -84,9 +84,14 @@
 
   // ---- MARK ----------------------------------------------------------------
 
+  // Returns true only if the MARK input was actually shown -- i.e. the recorder
+  // is active AND this page is in scope. The worker uses the return value to flash
+  // an error badge instead of failing silently when a MARK lands nowhere.
   function promptMark() {
-    if (!active) return;
+    if (!active) return false;
+    if (!(window.AuditScope && window.AuditScope.inScope(location.href))) return false;
     showMarkInput();
+    return true;
   }
 
   function submitMark(text) {
@@ -484,10 +489,11 @@
         disable();
         sendResponse({ ok: true });
         break;
-      case 'recorder:mark-prompt':
-        promptMark();
-        sendResponse({ ok: true });
+      case 'recorder:mark-prompt': {
+        const shown = promptMark();
+        sendResponse({ ok: true, shown });
         break;
+      }
       default:
         sendResponse({ ok: false });
     }

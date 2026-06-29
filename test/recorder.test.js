@@ -93,6 +93,21 @@ test('recorder:mark-prompt shows the MARK input', async () => {
   assert.ok(document.getElementById('__audit_mark_input__'));
 });
 
+// promptMark must report whether it actually showed the input, so the worker can
+// flash an error badge instead of failing silently when a MARK lands nowhere.
+test('promptMark returns shown:false on an out-of-scope URL', async () => {
+  await deliver({ type: 'recorder:start', intervalMs: 5000 }); // active (localhost is in scope)
+  const real = window.AuditScope;
+  window.AuditScope = { inScope: () => false, DENYLIST: [] }; // simulate navigating out of scope
+  try {
+    const resp = await deliver({ type: 'recorder:mark-prompt' });
+    assert.equal(resp.shown, false, 'must not show a MARK input on an out-of-scope page');
+    assert.equal(document.getElementById('__audit_mark_input__'), null, 'no input element is created');
+  } finally {
+    window.AuditScope = real;
+  }
+});
+
 // The MARK field must be a multi-line, scrollable textarea so dictated text is
 // readable (you can scroll back; it auto-scrolls to the latest words as you speak).
 // The scroll behavior itself is browser-gated (jsdom has no layout); here we only

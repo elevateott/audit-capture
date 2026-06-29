@@ -435,8 +435,15 @@ async function handleMarkCommand(tab) {
     return;
   }
   try {
-    await chrome.tabs.sendMessage(tab.id, { type: 'recorder:mark-prompt' });
-    await clearBadge(); // success: the on-page prompt is the feedback
+    const resp = await chrome.tabs.sendMessage(tab.id, { type: 'recorder:mark-prompt' });
+    if (!resp || !resp.shown) {
+      // The content script is present but declined to show the input (out of
+      // scope, or not recording on this tab). The MARK would land nowhere, so
+      // surface it instead of letting the keypress vanish.
+      await flashBadge('X', '#c0392b'); // red X
+    } else {
+      await clearBadge(); // success: the on-page prompt is the feedback
+    }
   } catch (e) {
     // No content script on this tab: its host is not in the manifest allowlist
     // (Phase 1 = localhost/127.0.0.1 only) or it is a restricted page. This is

@@ -54,6 +54,8 @@ function makeChrome() {
     },
     _calls: calls,
     _tabs: tabsById,
+    // The reply the page gives to a recorder:mark-prompt; tests flip shown.
+    _markPromptResponse: { ok: true, shown: true },
     _fireDbg: (src, method, params) => { for (const f of [...dbgEvent]) f(src, method, params); },
     _fireDetach: (src) => { for (const f of [...dbgDetach]) f(src); },
     _fireActivated: (tabId) => { for (const f of [...tabActivated]) f({ tabId }); },
@@ -76,7 +78,11 @@ function makeChrome() {
         calls.capture++;
         return 'data:image/jpeg;base64,' + Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64');
       },
-      sendMessage: async (id, msg) => { calls.tabMessages.push({ id, msg }); },
+      sendMessage: async (id, msg) => {
+        calls.tabMessages.push({ id, msg });
+        if (msg && msg.type === 'recorder:mark-prompt') return chrome._markPromptResponse;
+        return undefined;
+      },
       query: async () => [{ id: 1, windowId: 1, title: 'Smoke' }],
       get: async (id) => {
         const t = tabsById[id];
@@ -195,6 +201,33 @@ test('MARK command flashes an error badge when the active tab has no content scr
   } finally {
     global.chrome.tabs.sendMessage = origSend;
   }
+});
+
+// --- silent-MARK gap on out-of-scope tabs: the page is present but declines ---
+test('MARK command flashes X and records no mark when the page declines (shown:false)', async () => {
+  await send({ type: 'session:start' });
+  const prev = global.chrome._markPromptResponse;
+  global.chrome._markPromptResponse = { ok: true, shown: false };
+  try {
+    const beforeMarks = (await self.AuditStore.getAll('narration')).length;
+    const before = global.chrome._calls.badge.length;
+    await global.chrome._cmd('mark');
+    const after = global.chrome._calls.badge.slice(before);
+    assert.ok(after.includes('X'), 'must flash X when the MARK would land nowhere');
+    const afterMarks = (await self.AuditStore.getAll('narration')).length;
+    assert.equal(afterMarks, beforeMarks, 'no mark is recorded when the prompt was not shown');
+  } finally {
+    global.chrome._markPromptResponse = prev;
+  }
+});
+
+test('MARK command shows no error badge when the page accepts (shown:true)', async () => {
+  await send({ type: 'session:start' });
+  global.chrome._markPromptResponse = { ok: true, shown: true };
+  const before = global.chrome._calls.badge.length;
+  await global.chrome._cmd('mark');
+  const after = global.chrome._calls.badge.slice(before);
+  assert.ok(!after.includes('X') && !after.includes('!'), 'no failure badge when the prompt was shown');
 });
 
 // --- NETWORK keystone (red): failures stored + appended to timeline ----------
