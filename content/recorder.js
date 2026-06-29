@@ -432,7 +432,16 @@
       ev.stopPropagation();
       let png;
       try { png = canvas.toDataURL('image/png'); } catch (e) { png = null; }
-      if (png) send('annotation', { dataUrl: png });
+      if (!png) { showToast('Annotation failed — could not export image'); close(); return; }
+      // Callback (not fire-and-forget) so the toast reflects what the worker
+      // actually did: it returns { ok:true, name } or { ok:false, error }.
+      chrome.runtime.sendMessage({ type: 'annotation', route: route(), dataUrl: png }, (resp) => {
+        if (chrome.runtime.lastError || !resp || !resp.ok) {
+          showToast('Annotation not saved' + (resp && resp.error ? ' — ' + resp.error : ''));
+        } else {
+          showToast('Annotation saved');
+        }
+      });
       close();
     });
     cancelBtn.addEventListener('click', (ev) => { ev.stopPropagation(); close(); });
