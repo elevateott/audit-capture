@@ -331,18 +331,77 @@ chrome.commands.onCommand.addListener(async (command) => {
     if (s && s.active) await stopSession();
     else await startSession(tab);
   } else if (command === 'mark') {
-    // Ask the content script to prompt for MARK text on the page.
-    if (tab && tab.id != null) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, { type: 'recorder:mark-prompt' });
-      } catch (e) {
-        /* no content script here */
-      }
-    }
+    await handleMarkCommand(tab);
   }
 });
+
+// MARK is the capture surface used most, so a swallowed keypress is the worst
+// silent failure in the tool. Every failure path here is made VISIBLE on the
+// toolbar badge instead of being dropped into a catch block.
+// (ASCII-only on purpose: badge glyphs render everywhere and avoid encoding
+// surprises in tooling.)
+async function handleMarkCommand(tab) {
+  const session = await getSession();
+  if (!session || !session.active) {
+    // Nothing to anchor a MARK to; do not open a prompt that goes nowhere.
+    await flashBadge('!', '#e67e22'); // amber: "start a session first"
+    return;
+  }
+  if (!tab || tab.id == null) {
+    await flashBadge('X', '#c0392b'); // red X: could not reach a page
+    return;
+  }
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: 'recorder:mark-prompt' });
+    await clearBadge(); // success: the on-page prompt is the feedback
+  } catch (e) {
+    // No content script on this tab: its host is not in the manifest allowlist
+    // (Phase 1 = localhost/127.0.0.1 only) or it is a restricted page. This is
+    // the exact case that previously failed silently.
+    console.warn(
+      '[audit] MARK undelivered - no recorder on this tab:',
+      e && e.message
+    );
+    await flashBadge('X', '#c0392b'); // red X
+  }
+}
+
+// Brief toolbar-badge flash for MARK feedback. Uses the action API, which needs
+// no extra permission. Guarded so a missing chrome.action (e.g. in tests) is a
+// no-op rather than a throw. Self-clears; if the worker is killed first the
+// badge just lingers harmlessly until the next MARK.
+let badgeClearTimer = null;
+async function flashBadge(text, color) {
+  if (!chrome.action) return;
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color });
+    await chrome.action.setBadgeText({ text });
+    if (badgeClearTimer) clearTimeout(badgeClearTimer);
+    badgeClearTimer = setTimeout(() => {
+      if (chrome.action) chrome.action.setBadgeText({ text: '' });
+      badgeClearTimer = null;
+    }, 2500);
+  } catch (_) {
+    /* action API hiccup; nothing else to do */
+  }
+}
+
+async function clearBadge() {
+  if (!chrome.action) return;
+  try {
+    if (badgeClearTimer) {
+      clearTimeout(badgeClearTimer);
+      badgeClearTimer = null;
+    }
+    await chrome.action.setBadgeText({ text: '' });
+  } catch (_) {
+    /* ignore */
+  }
+}
 
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab || null;
 }
+
+// end of service-worker.js

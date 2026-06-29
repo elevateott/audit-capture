@@ -39,8 +39,12 @@ function makeChrome() {
   const sessionData = {};
   const dbgEvent = [];
   const dbgDetach = [];
-  const calls = { capture: 0, download: [], tabMessages: [] };
+  const calls = { capture: 0, download: [], tabMessages: [], badge: [] };
   const chrome = {
+    action: {
+      setBadgeBackgroundColor: async () => {},
+      setBadgeText: async ({ text }) => { calls.badge.push(text); },
+    },
     _calls: calls,
     _fireDbg: (src, method, params) => { for (const f of [...dbgEvent]) f(src, method, params); },
     runtime: {
@@ -129,6 +133,48 @@ test('a mark message writes narration and a timeline mark entry', async () => {
   assert.match(narration[0].line, /\(\/checkout\)/);
   const tl = await self.AuditStore.getAll('timeline');
   assert.ok(tl.some((e) => e.type === 'mark'), 'a mark timeline entry must exist');
+});
+
+// --- MARK command feedback: a swallowed keypress must become VISIBLE ---------
+test('MARK command on an active session asks the page to prompt, no error badge', async () => {
+  await send({ type: 'session:start' });
+  const before = global.chrome._calls.badge.length;
+  await global.chrome._cmd('mark');
+  const msgs = global.chrome._calls.tabMessages;
+  assert.ok(
+    msgs.some((m) => m.msg && m.msg.type === 'recorder:mark-prompt'),
+    'must ask the page to open the MARK prompt'
+  );
+  const after = global.chrome._calls.badge.slice(before);
+  assert.ok(!after.includes('X') && !after.includes('!'), 'no failure badge on success');
+});
+
+test('MARK command with no active session flashes a warning badge and opens no prompt', async () => {
+  await send({ type: 'session:stop' }); // ensure no active session
+  const beforeMsgs = global.chrome._calls.tabMessages.length;
+  await global.chrome._cmd('mark');
+  assert.ok(global.chrome._calls.badge.includes('!'), 'must flash the amber "start a session" badge');
+  const newMsgs = global.chrome._calls.tabMessages.slice(beforeMsgs);
+  assert.ok(
+    !newMsgs.some((m) => m.msg && m.msg.type === 'recorder:mark-prompt'),
+    'must NOT open a prompt when there is no session to anchor it to'
+  );
+});
+
+test('MARK command flashes an error badge when the active tab has no content script', async () => {
+  await send({ type: 'session:start' });
+  const origSend = global.chrome.tabs.sendMessage;
+  global.chrome.tabs.sendMessage = async () => {
+    throw new Error('Could not establish connection. Receiving end does not exist.');
+  };
+  try {
+    const before = global.chrome._calls.badge.length;
+    await global.chrome._cmd('mark');
+    const after = global.chrome._calls.badge.slice(before);
+    assert.ok(after.includes('X'), 'must flash the red X when MARK cannot reach the page');
+  } finally {
+    global.chrome.tabs.sendMessage = origSend;
+  }
 });
 
 // --- NETWORK keystone (red): failures stored + appended to timeline ----------
