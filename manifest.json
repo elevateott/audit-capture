@@ -14,8 +14,8 @@
   ],
 
   "host_permissions": [
-    "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://*/*",
+    "https://*/*"
   ],
 
   "background": {
@@ -50,7 +50,7 @@
 
   "content_scripts": [
     {
-      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "matches": ["http://*/*", "https://*/*"],
       "js": ["lib/selector.js", "content/recorder.js"],
       "run_at": "document_idle"
     }
