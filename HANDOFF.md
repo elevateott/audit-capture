@@ -54,9 +54,9 @@ On Stop, the extension produces a folder (or zip) named `audit-<timestamp>/` con
 | `network-errors.txt` | Failed requests only: method, URL, status, timestamp, route. |
 | `environment.json` | Viewport, DPR, zoom, UA, host, URL, capturedAt \+ optional custom fields. |
 | `<ts>_annotated.png` (optional) | Draw-on-frame annotations, next to the raw frame. |
-| `timeline.json` | Ordered join of every event: `{t, route, type, ref}`. The keystone. |
+| `timeline.json` | Ordered join of every event: `{t, route, type, ref}`. The keystone. A `'mark'` entry additionally carries an optional `markId` (string, zero-padded, e.g. `"001"`) that matches the MARK id in `narration.txt`, so the two streams join exactly without guessing by timestamp+route. |
 
-This shape is designed so a downstream AI audit step can inventory the folder and reconcile the streams with no transformation. Keep filenames and JSON shapes stable — changing them breaks consumers.
+This shape is designed so a downstream AI audit step can inventory the folder and reconcile the streams with no transformation. Keep filenames and JSON shapes stable — changing them breaks consumers. New fields must be **additive and backward-compatible**: consumers that ignore unknown keys (like `markId`, added on `'mark'` entries) keep working.
 
 ## 5\. Architecture summary (full detail in BUILD-GUIDE.md)
 

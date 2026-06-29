@@ -40,7 +40,7 @@ async function seedAndBuild() {
 
   await self.AuditStore.put('timeline', { t: base + 5000, route: '/b', type: 'frame', ref: f2 });
   await self.AuditStore.put('timeline', { t: base, route: '/a', type: 'frame', ref: f1 });
-  await self.AuditStore.put('timeline', { t: base + 2000, route: '/a', type: 'mark', ref: f1 });
+  await self.AuditStore.put('timeline', { t: base + 2000, route: '/a', type: 'mark', ref: f1, markId: '001' });
 
   const pkg = await self.AuditPackage.build({ title: 'demo', startedAt: base });
   const b64 = pkg.dataUrl.split(',')[1];
@@ -102,6 +102,9 @@ test('timeline.json is ascending by t and every frame ref resolves to a file', a
   for (const e of tl) {
     assert.ok('t' in e && 'route' in e && 'type' in e && 'ref' in e);
     if (e.type === 'frame') assert.ok(filesInZip.has(e.ref), 'frame ref missing: ' + e.ref);
+    // Additive, backward-compatible: 'mark' entries carry a markId matching the
+    // MARK id in narration.txt; other types must not.
+    if (e.type === 'mark') assert.equal(e.markId, '001', 'mark entry carries its narration id');
   }
 });
 

@@ -201,7 +201,7 @@
     // scrollable: fixed max-height, scrolls rather than growing without bound.
     const input = document.createElement('textarea');
     input.rows = 3;
-    input.placeholder = "What's wrong + your call — e.g. featured image missing, verdict: bug";
+    input.placeholder = "Describe the issue, end with a verdict: bug · polish · question";
     input.style.cssText =
       'width:320px;max-height:6em;overflow-y:auto;resize:none;' +
       'font:12px system-ui,sans-serif;padding:5px 7px;border:1px solid #444;border-radius:5px;background:#111;color:#fff';

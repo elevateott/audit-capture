@@ -171,6 +171,12 @@ test('marks are auto-numbered MARK 001, then MARK 002 within a session', async (
   const lines = (await self.AuditStore.getAll('narration')).map((n) => n.line);
   assert.ok(lines.some((l) => /MARK 001 — featured image missing, verdict: bug/.test(l)));
   assert.ok(lines.some((l) => /MARK 002 — spacing off, verdict: nit/.test(l)));
+  // The 'mark' timeline entries carry the SAME id as the narration line, so the
+  // two streams join exactly (additive markId field).
+  const markIds = (await self.AuditStore.getAll('timeline'))
+    .filter((e) => e.type === 'mark')
+    .map((e) => e.markId);
+  assert.deepEqual(markIds.sort(), ['001', '002'], 'mark timeline entries carry markId 001/002');
 });
 
 test('a fresh session resets MARK numbering to 001', async () => {

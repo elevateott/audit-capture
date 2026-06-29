@@ -113,6 +113,7 @@ async function addMark(text, route) {
     route: route || '/',
     type: 'mark',
     ref: session.lastFrame || null,
+    markId: id, // additive: same id as the narration line, for an exact join.
   });
   return id;
 }
