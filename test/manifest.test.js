@@ -29,10 +29,18 @@ test('every file the manifest references exists', () => {
   }
 });
 
-test('host_permissions and content_scripts.matches are in sync', () => {
-  const hosts = [...manifest.host_permissions].sort();
+test('host_permissions grant <all_urls> while content_scripts stay http(s)-only', () => {
+  // These are intentionally NOT in sync: captureVisibleTab is stricter than
+  // executeScript — ordinary host patterns (http://*/*) do NOT authorize it, only
+  // <all_urls> or activeTab do. So host_permissions must include <all_urls> for
+  // screenshots to work on tabs that never received the activeTab gesture, while
+  // content_scripts.matches stay http+https so we never inject on chrome://, etc.
   const matches = [...manifest.content_scripts[0].matches].sort();
-  assert.deepEqual(matches, hosts, 'content_scripts.matches must equal host_permissions');
+  assert.deepEqual(matches, ['http://*/*', 'https://*/*'], 'content scripts inject on http+https only');
+  assert.ok(
+    manifest.host_permissions.includes('<all_urls>'),
+    'host_permissions must include <all_urls> so captureVisibleTab works on tabs without activeTab'
+  );
 });
 
 test('content script loads selector before recorder', () => {

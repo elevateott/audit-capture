@@ -170,8 +170,13 @@
     annotateBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       chrome.runtime.sendMessage({ type: 'annotate:capture', route: route() }, (resp) => {
-        if (chrome.runtime.lastError) return;
-        if (!resp || !resp.dataUrl) return;
+        // Same "no silent failures" rule as MARK: a blocked screenshot must be
+        // visible, not swallowed. captureVisibleTab can still fail on a restricted
+        // page even with <all_urls>, so surface it instead of dropping the click.
+        if (chrome.runtime.lastError || !resp || !resp.ok || !resp.dataUrl) {
+          showToast('Annotate failed — screenshot blocked on this tab');
+          return;
+        }
         openAnnotator(resp.dataUrl);
       });
     });
@@ -346,8 +351,11 @@
       toolBtns[key] = b;
       toolbar.appendChild(b);
     }
-    const saveBtn = mkBtn('Save', ';background:#1e7a34');
-    const cancelBtn = mkBtn('Cancel');
+    // Action pair, visually distinct from the gray/green tool buttons: Save is a
+    // green confirm, Cancel a red discard. The left margin sets them apart as a
+    // separate group from Pen/Arrow/Circle.
+    const saveBtn = mkBtn('Save', ';background:#1e7a34;margin-left:12px');
+    const cancelBtn = mkBtn('Cancel', ';background:#b23b3b');
     toolbar.appendChild(saveBtn);
     toolbar.appendChild(cancelBtn);
 
