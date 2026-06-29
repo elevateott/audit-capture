@@ -289,6 +289,7 @@ async function startSession(tab) {
       await chrome.tabs.sendMessage(tab.id, {
         type: 'recorder:start',
         intervalMs: session.intervalMs,
+        startedAt: session.startedAt,
       });
     } catch (e) {
       // Content script not injected on this page (host not in matches, or the

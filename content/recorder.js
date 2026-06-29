@@ -134,6 +134,33 @@
 
   let overlay = null;
   let counterEl = null;
+  let clockEl = null;
+  let clockId = null;
+  let startedAt = null;
+
+  function fmtClock(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const mm = String(Math.floor(total / 60)).padStart(2, '0');
+    const ss = String(total % 60).padStart(2, '0');
+    return mm + ':' + ss;
+  }
+
+  function paintClock() {
+    if (!clockEl) return;
+    clockEl.textContent = startedAt != null ? fmtClock(Date.now() - startedAt) : '--:--';
+  }
+
+  // Display-only 1s tick. Lives in the content script (page lifecycle), NOT the
+  // worker. Ticks regardless of tab focus — it's just a readout, no capture.
+  function startClock() {
+    stopClock();
+    paintClock();
+    clockId = setInterval(paintClock, 1000);
+  }
+  function stopClock() {
+    if (clockId != null) clearInterval(clockId);
+    clockId = null;
+  }
 
   function buildOverlay() {
     if (overlay) return;
@@ -149,6 +176,10 @@
     const dot = document.createElement('span');
     dot.textContent = '● REC';
     dot.style.cssText = 'color:#dc3434;font-weight:600';
+
+    clockEl = document.createElement('span');
+    clockEl.style.cssText =
+      'font-weight:700;font-size:14px;font-variant-numeric:tabular-nums;letter-spacing:.5px';
 
     counterEl = document.createElement('span');
     counterEl.style.cssText = 'opacity:.8';
@@ -182,6 +213,7 @@
     });
 
     overlay.appendChild(dot);
+    overlay.appendChild(clockEl);
     overlay.appendChild(counterEl);
     overlay.appendChild(markBtn);
     overlay.appendChild(annotateBtn);
@@ -193,6 +225,7 @@
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
     overlay = null;
     counterEl = null;
+    clockEl = null;
   }
 
   function setCounter() {
@@ -453,10 +486,11 @@
 
   // ---- enable / disable ----------------------------------------------------
 
-  function enable(intervalMs) {
+  function enable(intervalMs, startedAtArg) {
     if (active) return;
     active = true;
     currentIntervalMs = intervalMs || currentIntervalMs;
+    if (typeof startedAtArg === 'number') startedAt = startedAtArg;
     lastRoute = route();
     document.addEventListener('click', onClick, true);
     document.addEventListener('change', onChange, true);
@@ -465,6 +499,7 @@
     // Foreground-only: tick now if we are the visible tab, else wait for focus.
     applyTickingForVisibility();
     buildOverlay();
+    startClock();
     sendEnvironment();
   }
 
@@ -492,6 +527,8 @@
     window.removeEventListener('popstate', onNav);
     window.removeEventListener('hashchange', onNav);
     stopTicking();
+    stopClock();
+    startedAt = null;
     removeOverlay();
     // Dismiss an open MARK input so it doesn't linger after the session ends.
     const markInput = document.getElementById('__audit_mark_input__');
@@ -506,7 +543,7 @@
         // Only self-enable on in-scope pages (a denylisted host stays dark even
         // if the worker broadcasts a start).
         if (window.AuditScope && window.AuditScope.inScope(location.href)) {
-          enable(msg.intervalMs);
+          enable(msg.intervalMs, msg.startedAt);
         }
         sendResponse({ ok: true });
         break;
@@ -533,7 +570,7 @@
       // A live session resumes capture only on in-scope pages -- otherwise every
       // tab you focus during a session would greedily start recording.
       if (window.AuditScope && window.AuditScope.inScope(location.href)) {
-        enable(resp.session.intervalMs);
+        enable(resp.session.intervalMs, resp.session.startedAt);
       }
     }
   });
