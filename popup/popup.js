@@ -3,17 +3,48 @@
 const startBtn = document.getElementById('start');
 const stopBtn = document.getElementById('stop');
 const statusEl = document.getElementById('status');
+const elapsedEl = document.getElementById('elapsed');
 
 function setStatus(text) { statusEl.textContent = text; }
+
+// Live mm:ss from the worker's session.startedAt. Cosmetic only — if startedAt
+// is missing show nothing rather than NaN. The popup ticks it itself (1s) while
+// open; the worker owns the authoritative count (the toolbar badge in minutes).
+let elapsedTimer = null;
+let startedAt = null;
+
+function fmtElapsed(ms) {
+  const total = Math.floor(ms / 1000);
+  const mm = String(Math.floor(total / 60)).padStart(2, '0');
+  const ss = String(total % 60).padStart(2, '0');
+  return mm + ':' + ss;
+}
+
+function paintElapsed() {
+  if (startedAt == null) { elapsedEl.textContent = ''; return; }
+  elapsedEl.textContent = fmtElapsed(Date.now() - startedAt);
+}
+
+function stopElapsed() {
+  if (elapsedTimer != null) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  startedAt = null;
+  elapsedEl.textContent = '';
+}
 
 function render(session) {
   const active = !!(session && session.active);
   startBtn.disabled = active;
   stopBtn.disabled = !active;
   if (active) {
-    setStatus('Recording… ' + (session.frameCount || 0) + ' frame(s)');
+    setStatus('Recording… ' + (session.frameCount || 0) + ' frame(s) ');
+    startedAt = typeof session.startedAt === 'number' ? session.startedAt : null;
+    paintElapsed();
+    if (elapsedTimer == null && startedAt != null) {
+      elapsedTimer = setInterval(paintElapsed, 1000);
+    }
   } else {
     setStatus('Idle.');
+    stopElapsed();
   }
 }
 
@@ -41,6 +72,9 @@ stopBtn.addEventListener('click', async () => {
   setStatus('Saved ' + r.filename + ' — ' + (c.frames || 0) + ' frames, ' + (c.timeline || 0) + ' events.');
   render(null);
 });
+
+// Stop the ticker when the popup closes so it doesn't leak across reopens.
+window.addEventListener('pagehide', stopElapsed);
 
 // Reflect current state when the popup opens.
 (async () => {

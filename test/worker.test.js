@@ -120,7 +120,7 @@ function makeChrome() {
 }
 
 global.chrome = makeChrome();
-require(path.join(REPO, 'background/service-worker.js'));
+const worker = require(path.join(REPO, 'background/service-worker.js'));
 
 const send = (msg, sender = {}) =>
   new Promise((resolve) => { global.chrome._msg(msg, sender, resolve); });
@@ -404,4 +404,19 @@ test('an annotation message stores a *_annotated.png and appends a timeline entr
   assert.match(anns[0].name, /_annotated\.png$/, 'named <ts>_annotated.png');
   const tl = await self.AuditStore.getAll('timeline');
   assert.ok(tl.some((e) => e.type === 'annotation'), 'annotation must appear in timeline.json');
+});
+
+// --- elapsed-time badge (display-only): the pure threshold logic --------------
+// timerBadge(elapsedMs) -> { text: minutes, color }. Visual 30-minute budget
+// warning: grey under 25, amber 25-29, red at/after 30. Pure, no Chrome mock.
+test('timerBadge shows minutes and a grey/amber/red budget colour', () => {
+  const MIN = 60000;
+  assert.deepEqual(worker.timerBadge(0), { text: '0', color: '#5f6368' }, '0ms -> 0, grey');
+  assert.deepEqual(worker.timerBadge(24 * MIN), { text: '24', color: '#5f6368' }, '24min -> grey (under budget)');
+  assert.deepEqual(worker.timerBadge(25 * MIN), { text: '25', color: '#e67e22' }, '25min -> amber (warning)');
+  assert.deepEqual(worker.timerBadge(29 * MIN), { text: '29', color: '#e67e22' }, '29min -> amber');
+  assert.deepEqual(worker.timerBadge(30 * MIN), { text: '30', color: '#c0392b' }, '30min -> red (over budget)');
+  assert.deepEqual(worker.timerBadge(42 * MIN), { text: '42', color: '#c0392b' }, '42min -> red');
+  // Floors to whole minutes (partial minute still shows the lower count).
+  assert.equal(worker.timerBadge(90 * 1000).text, '1', '90s -> 1 minute (floored)');
 });

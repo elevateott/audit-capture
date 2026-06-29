@@ -72,6 +72,12 @@ async function captureFrame(windowId, route, reason) {
   session.frameCount = (session.frameCount || 0) + 1;
   session.lastFrame = name;
   await setSession(session);
+
+  // The frame interval is the worker's only heartbeat (MV3 kills idle workers,
+  // and we add no setInterval/alarm of our own), so the elapsed-time badge can
+  // only advance on a tick. If frames stop the badge freezes — acceptable: a
+  // session that isn't capturing is already broken.
+  await renderBadge();
 }
 
 // ---- timeline (the keystone) ----------------------------------------------
@@ -272,6 +278,9 @@ async function startSession(tab) {
   // First step: setViewport, so recording.json matches DevTools Recorder shape.
   await appendStep({ type: 'setViewport', title: session.title });
 
+  // Show the elapsed-time badge at 0 right away, before the first frame tick.
+  await renderBadge();
+
   if (tab && tab.id != null) {
     // Make sure the recorder is actually present first: a start tab that predates
     // the extension never got the static content script. Idempotent if it did.
@@ -339,6 +348,7 @@ async function stopSession() {
   }
 
   await clearSession();
+  await renderBadge(); // no active session now -> resolves to a blank badge
   return { ok: true, filename: pkg.filename, counts: pkg.counts };
 }
 
@@ -523,10 +533,45 @@ async function handleMarkCommand(tab) {
   }
 }
 
+// ---- elapsed-time badge (display-only; visual 30-minute budget warning) -----
+// Shows elapsed MINUTES on the toolbar icon while a session records. It's
+// browser chrome, so it never appears in captured frames. No auto-stop — the
+// 30-minute line is a colour warning only. Thresholds are constants; tune freely.
+const TIMER_WARN_MIN = 25; // amber at/after this
+const TIMER_OVER_MIN = 30; // red at/after this
+
+// Pure: elapsed ms -> what the resting badge should show. Unit-tested.
+function timerBadge(elapsedMs) {
+  const min = Math.floor(elapsedMs / 60000);
+  let color = '#5f6368'; // neutral grey: under budget
+  if (min >= TIMER_OVER_MIN) color = '#c0392b'; // red: over 30
+  else if (min >= TIMER_WARN_MIN) color = '#e67e22'; // amber: 25-29
+  return { text: String(min), color };
+}
+
+// The single source of truth for the badge's AT-REST content: the minute count
+// while a session is active, blank otherwise. flashBadge's transient MARK glyph
+// recovers to THIS (not to blank) so a MARK never wipes the running timer.
+async function renderBadge() {
+  if (!chrome.action) return;
+  const s = await getSession();
+  try {
+    if (s && s.active) {
+      const { text, color } = timerBadge(Date.now() - s.startedAt);
+      await chrome.action.setBadgeBackgroundColor({ color });
+      await chrome.action.setBadgeText({ text });
+    } else {
+      await chrome.action.setBadgeText({ text: '' });
+    }
+  } catch (_) {
+    /* action API hiccup; nothing else to do */
+  }
+}
+
 // Brief toolbar-badge flash for MARK feedback. Uses the action API, which needs
 // no extra permission. Guarded so a missing chrome.action (e.g. in tests) is a
-// no-op rather than a throw. Self-clears; if the worker is killed first the
-// badge just lingers harmlessly until the next MARK.
+// no-op rather than a throw. Self-clears to the resting badge (the minute count
+// if a session is active) so a MARK flash never blanks the running timer.
 let badgeClearTimer = null;
 async function flashBadge(text, color) {
   if (!chrome.action) return;
@@ -535,7 +580,7 @@ async function flashBadge(text, color) {
     await chrome.action.setBadgeText({ text });
     if (badgeClearTimer) clearTimeout(badgeClearTimer);
     badgeClearTimer = setTimeout(() => {
-      if (chrome.action) chrome.action.setBadgeText({ text: '' });
+      renderBadge();
       badgeClearTimer = null;
     }, 2500);
   } catch (_) {
@@ -550,7 +595,9 @@ async function clearBadge() {
       clearTimeout(badgeClearTimer);
       badgeClearTimer = null;
     }
-    await chrome.action.setBadgeText({ text: '' });
+    // Restore the resting badge (minutes if recording) rather than blanking it,
+    // so a successful MARK keeps the running timer visible.
+    await renderBadge();
   } catch (_) {
     /* ignore */
   }
@@ -559,6 +606,12 @@ async function clearBadge() {
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab || null;
+}
+
+// Expose the pure badge-threshold logic for unit testing. No-op in the real
+// worker, where `module` is undefined.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { timerBadge };
 }
 
 // end of service-worker.js
