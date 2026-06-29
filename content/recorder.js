@@ -341,12 +341,12 @@
     const toolBtns = {};
     for (const [key, label] of tools) {
       const b = mkBtn(label);
-      if (key === tool) b.style.background = '#1e7a34';
+      if (key === tool) b.style.background = '#2563EB';
       b.addEventListener('click', (ev) => {
         ev.stopPropagation();
         tool = key;
         for (const k of Object.keys(toolBtns)) toolBtns[k].style.background = '#3a3a40';
-        b.style.background = '#1e7a34';
+        b.style.background = '#2563EB';
       });
       toolBtns[key] = b;
       toolbar.appendChild(b);
