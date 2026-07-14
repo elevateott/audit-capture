@@ -27,10 +27,13 @@ global.location = dom.window.location;
 global.Node = dom.window.Node;
 global.Element = dom.window.Element;
 
-// Count startTicking() calls: startTicking is the ONLY caller of setInterval, so
-// this lets the visibility tests assert whether the capture interval started.
+// Count capture-interval starts. recorder.js has TWO setInterval callers:
+// startTicking() (the 5s capture tick — visibility-gated) and startClock() (the
+// 1s overlay clock — started unconditionally). Only the capture tick matters
+// here, so ignore the 1000ms clock; otherwise a hidden tab (no capture, but the
+// clock still runs) would look like it ticked.
 let intervalStarts = 0;
-global.setInterval = () => { intervalStarts++; return 1; };
+global.setInterval = (fn, ms) => { if (ms !== 1000) intervalStarts++; return 1; };
 global.clearInterval = () => {};
 
 // jsdom's default visibilityState is 'prerender'; stub it so the recorder's
