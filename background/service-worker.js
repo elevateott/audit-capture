@@ -10,30 +10,20 @@
 
 // Classic (non-module) worker, so importScripts is available.
 //
-// COLD-START: importScripts runs synchronously on EVERY worker wake, so keep the
-// top-level set small. jszip is ~97KB (most of the bundle) and is only needed by
-// lib/package.js -> build() on Stop, so it is loaded lazily via ensureJSZip()
-// there — not here — to keep Start/MARK/capture wakes cheap (matters most on
-// resource-constrained hosts like Azure Virtual Desktop, where a heavy cold wake
-// can lose the race against a click).
+// ALL importScripts MUST run here, during the worker's initial top-level
+// evaluation. Chrome forbids importScripts() after the worker is installed — a
+// call from an event handler (e.g. lazily loading jszip on Stop) throws
+// "importScripts() of new scripts after service worker installation is not
+// allowed". So jszip is loaded up front even though it's only needed on export.
+// The worker re-evaluates this whole file on every wake; that re-parse cost is
+// inherent to MV3 and not something importScripts placement can avoid.
 importScripts(
   chrome.runtime.getURL('lib/scope.js'),
+  chrome.runtime.getURL('lib/jszip.min.js'),
   chrome.runtime.getURL('lib/store.js'),
   chrome.runtime.getURL('lib/package.js'),
   chrome.runtime.getURL('lib/debugger-tap.js')
 );
-
-// Lazily pull in JSZip the first time we build a package. importScripts is
-// synchronous and safe to call late; the guard prevents a redundant recompile
-// within a single worker lifetime. package.js only touches JSZip inside build(),
-// so it is fine to load package.js above without jszip present yet.
-let jszipLoaded = false;
-function ensureJSZip() {
-  if (!jszipLoaded) {
-    importScripts(chrome.runtime.getURL('lib/jszip.min.js'));
-    jszipLoaded = true;
-  }
-}
 
 const DEFAULT_INTERVAL_MS = 5000;
 const SESSION_KEY = 'session';
@@ -346,7 +336,6 @@ async function stopSession() {
 
   let pkg;
   try {
-    ensureJSZip(); // first build of this worker's life compiles jszip; see top
     pkg = await self.AuditPackage.build({
       title: session.title,
       startedAt: session.startedAt,
