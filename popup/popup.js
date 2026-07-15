@@ -76,8 +76,16 @@ stopBtn.addEventListener('click', async () => {
 // Stop the ticker when the popup closes so it doesn't leak across reopens.
 window.addEventListener('pagehide', stopElapsed);
 
-// Reflect current state when the popup opens.
+// Reflect current state when the popup opens. Read the worker's session record
+// straight from chrome.storage.session — the same 'session' key
+// background/service-worker.js owns — instead of a session:status round-trip.
+// A status message would block first paint on a COLD service-worker start
+// (re-read + re-parse of every importScripts file), which costs whole seconds
+// on network-backed profiles (AVD/FSLogix). The storage read is served by the
+// browser process, so opening the popup wakes no worker at all. Extension pages
+// are trusted contexts — no setAccessLevel needed. The worker KEEPS its
+// session:status handler: content/recorder.js still uses it to self-resume.
 (async () => {
-  const r = await send({ type: 'session:status' });
-  render(r && r.ok ? r.session : null);
+  const o = await chrome.storage.session.get('session');
+  render(o && o.session ? o.session : null);
 })();
